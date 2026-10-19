@@ -2241,12 +2241,22 @@ static int ums512_clk_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	/*
+	 * Keep the domain up while the clks register: without a reference
+	 * the clk core's get/put around each registration powers the domain
+	 * off and on again, ~110 ms a clk (sprd_pmu_power_on/off sleep 50 ms
+	 * each), 2.9 s of boot for gpu_clk + mm_gate.
+	 */
+	pm_runtime_get_noresume(&pdev->dev);
+
 	if (desc->num_resets > 0) {
 		struct sprd_clk_drvdata *data = platform_get_drvdata(pdev);
 
 		reset = devm_kzalloc(&pdev->dev, sizeof(*reset), GFP_KERNEL);
-		if (!reset)
+		if (!reset) {
+			pm_runtime_put_noidle(&pdev->dev);
 			return -ENOMEM;
+		}
 
 		spin_lock_init(&reset->lock);
 		reset->rcdev.of_node = pdev->dev.of_node;
@@ -2260,7 +2270,10 @@ static int ums512_clk_probe(struct platform_device *pdev)
 			dev_warn(&pdev->dev, "Failed to register reset controller\n");
 	}
 
-	return sprd_clk_probe(&pdev->dev, desc->hw_clks);
+	ret = sprd_clk_probe(&pdev->dev, desc->hw_clks);
+	pm_runtime_put(&pdev->dev);
+
+	return ret;
 }
 
 static struct platform_driver ums512_clk_driver = {
