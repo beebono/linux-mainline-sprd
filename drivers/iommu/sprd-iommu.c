@@ -559,6 +559,32 @@ free_page:
 	return ret;
 }
 
+/*
+ * The IOMMU sits in a power domain that loses its registers when the SoC
+ * deep-sleeps (e.g. the display IOMMU inside the DPU block on ums512), while
+ * the page table lives in DDR and survives. Re-program the attached domain
+ * the way attach does, or the client fetches untranslated addresses.
+ */
+static int sprd_iommu_resume(struct device *dev)
+{
+	struct sprd_iommu_device *sdev = dev_get_drvdata(dev);
+	struct sprd_iommu_domain *dom = sdev->dom;
+
+	if (!dom)
+		return 0;
+
+	sprd_iommu_hw_en(sdev, false);
+	sprd_iommu_first_ppn(dom);
+	sprd_iommu_first_vpn(dom);
+	sprd_iommu_vpn_range(dom);
+	sprd_iommu_default_ppn(sdev);
+	sprd_iommu_hw_en(sdev, true);
+
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(sprd_iommu_pm_ops, NULL, sprd_iommu_resume);
+
 static void sprd_iommu_remove(struct platform_device *pdev)
 {
 	struct sprd_iommu_device *sdev = platform_get_drvdata(pdev);
@@ -574,6 +600,7 @@ static struct platform_driver sprd_iommu_driver = {
 	.driver	= {
 		.name		= "sprd-iommu",
 		.of_match_table	= sprd_iommu_of_match,
+		.pm		= pm_sleep_ptr(&sprd_iommu_pm_ops),
 		.suppress_bind_attrs = true,
 	},
 	.probe	= sprd_iommu_probe,
