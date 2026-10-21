@@ -68,11 +68,28 @@ static int sprd_pmu_power_off(struct generic_pm_domain *genpd)
 		regmap_write(pmu->base, pd->data->force_deep_sleep_offs + 0x1000,
 			     pd->data->force_deep_sleep_mask);
 
-	if (SPRD_PD_CAPS(pd, SPRD_PD_SHUTDOWN))
+	/*
+	 * Like the vendor driver: auto shutdown off, then force shutdown.
+	 * With auto shutdown left on the domain never reaches off.
+	 */
+	if (SPRD_PD_CAPS(pd, SPRD_PD_SHUTDOWN)) {
+		regmap_write(pmu->base, pd->data->pd_cfg_offs + 0x2000,
+			     SPRD_PMU_AUTO_SHUTDOWN_EN);
 		regmap_write(pmu->base, pd->data->pd_cfg_offs + 0x1000,
-			     SPRD_PMU_FORCE_SHUTDOWN_MASK);
+			     SPRD_PMU_FORCE_SHUTDOWN);
+	}
 
 	msleep(50);
+
+	if (pd->data->state_mask) {
+		u32 val;
+
+		regmap_read(pmu->base, pd->data->state_offs, &val);
+		val = (val & pd->data->state_mask) >> __ffs(pd->data->state_mask);
+		if (val != SPRD_PMU_PD_STATE_OFF)
+			dev_warn(pmu->dev, "%s: still on after shutdown, state %u\n",
+				 genpd->name, val);
+	}
 
 	clk_bulk_disable_unprepare(pd->num_clks, pd->clks);
 

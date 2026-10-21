@@ -9,6 +9,9 @@
 #define SPRD_PD_CAPS(_pd, _x)		((_pd)->data->caps & (_x))
 
 #define SPRD_PMU_FORCE_SHUTDOWN_MASK	GENMASK(25, 24)
+#define SPRD_PMU_FORCE_SHUTDOWN		BIT(25)
+#define SPRD_PMU_AUTO_SHUTDOWN_EN	BIT(24)
+#define SPRD_PMU_PD_STATE_OFF		7
 
 struct sprd_pmu_domain_data {
 	const char *name;
@@ -16,6 +19,8 @@ struct sprd_pmu_domain_data {
 	u32 pd_cfg_offs;
 	u32 force_deep_sleep_offs;
 	u32 force_deep_sleep_mask;
+	u32 state_offs;
+	u32 state_mask;
 };
 
 struct sprd_pmu_soc_data {

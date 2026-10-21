@@ -11,11 +11,15 @@ static const struct sprd_pmu_domain_data sprd_pmu_domain_data_ums512[] = {
 		.name = "gpu_top",
 		.caps = SPRD_PD_SHUTDOWN,
 		.pd_cfg_offs = 0x0030,
+		.state_offs = 0x010c,
+		.state_mask = GENMASK(15, 8),
 	},
 	[UMS512_POWER_DOMAIN_MM] = {
 		.name = "mm",
 		.caps = SPRD_PD_SHUTDOWN,
 		.pd_cfg_offs = 0x0024,
+		.state_offs = 0x010c,
+		.state_mask = GENMASK(23, 16),
 	},
 	[UMS512_POWER_DOMAIN_PUBCP] = {
 		.name = "pubcp",
