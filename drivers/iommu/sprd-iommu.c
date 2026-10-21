@@ -114,6 +114,23 @@ sprd_iommu_update_bits(struct sprd_iommu_device *sdev, unsigned int reg,
 	sprd_iommu_write(sdev, reg, t);
 }
 
+/*
+ * Some IOMMUs (the display one on ums512) share an APB enable gate with
+ * their client. The gate stays prepared from probe on and is only enabled
+ * around register accesses, so it can drop while the client is off.
+ */
+static inline void sprd_iommu_eb_on(struct sprd_iommu_device *sdev)
+{
+	if (sdev->eb)
+		clk_enable(sdev->eb);
+}
+
+static inline void sprd_iommu_eb_off(struct sprd_iommu_device *sdev)
+{
+	if (sdev->eb)
+		clk_disable(sdev->eb);
+}
+
 static inline int
 sprd_iommu_get_version(struct sprd_iommu_device *sdev)
 {
@@ -261,7 +278,9 @@ static void sprd_iommu_cleanup(struct sprd_iommu_domain *dom)
 	if (!dom->sdev || dom->sdev->dom != dom)
 		return;
 
+	sprd_iommu_eb_on(dom->sdev);
 	sprd_iommu_hw_en(dom->sdev, false);
+	sprd_iommu_eb_off(dom->sdev);
 	dom->sdev->dom = NULL;
 }
 
@@ -300,12 +319,14 @@ static int sprd_iommu_attach_device(struct iommu_domain *domain,
 	 * configure mapping table to avoid access conflict in case other
 	 * mapping table is stored in.
 	 */
+	sprd_iommu_eb_on(sdev);
 	sprd_iommu_hw_en(sdev, false);
 	sprd_iommu_first_ppn(dom);
 	sprd_iommu_first_vpn(dom);
 	sprd_iommu_vpn_range(dom);
 	sprd_iommu_default_ppn(sdev);
 	sprd_iommu_hw_en(sdev, true);
+	sprd_iommu_eb_off(sdev);
 
 	return 0;
 }
@@ -382,7 +403,9 @@ static int sprd_iommu_sync_map(struct iommu_domain *domain,
 		reg = SPRD_VAU_UPDATE;
 
 	/* clear IOMMU TLB buffer after page table updated */
+	sprd_iommu_eb_on(dom->sdev);
 	sprd_iommu_write(dom->sdev, reg, 0xffffffff);
+	sprd_iommu_eb_off(dom->sdev);
 	return 0;
 }
 
@@ -548,6 +571,9 @@ static int sprd_iommu_probe(struct platform_device *pdev)
 	if (ret)
 		goto remove_sysfs;
 
+	/* keep the gate prepared, enable it per access from here on */
+	sprd_iommu_eb_off(sdev);
+
 	return 0;
 
 remove_sysfs:
@@ -573,12 +599,14 @@ static int sprd_iommu_resume(struct device *dev)
 	if (!dom)
 		return 0;
 
+	sprd_iommu_eb_on(sdev);
 	sprd_iommu_hw_en(sdev, false);
 	sprd_iommu_first_ppn(dom);
 	sprd_iommu_first_vpn(dom);
 	sprd_iommu_vpn_range(dom);
 	sprd_iommu_default_ppn(sdev);
 	sprd_iommu_hw_en(sdev, true);
+	sprd_iommu_eb_off(sdev);
 
 	return 0;
 }

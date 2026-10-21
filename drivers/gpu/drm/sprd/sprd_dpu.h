@@ -51,6 +51,7 @@ struct dpu_context {
 	u8 if_type;
 	struct videomode vm;
 	bool stopped;
+	bool powered;
 	wait_queue_head_t wait_queue;
 	bool evt_update;
 	bool evt_stop;

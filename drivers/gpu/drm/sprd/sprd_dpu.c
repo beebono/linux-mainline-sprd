@@ -588,6 +588,51 @@ static void sprd_dpu_fini(struct sprd_dpu *dpu)
 	writel(0xff, ctx->base + REG_DPU_INT_CLR);
 }
 
+/*
+ * Gate the DPU clocks while the CRTC is off, as the vendor driver does:
+ * with CLK_DISPC_EB left on AP_SYS never reaches deep sleep. Nothing may
+ * touch DPU registers while !powered.
+ */
+static int sprd_dpu_clk_on(struct dpu_context *ctx)
+{
+	int ret;
+
+	if (ctx->powered)
+		return 0;
+
+	ret = clk_prepare_enable(ctx->clk);
+	if (ret)
+		return ret;
+
+	ret = clk_prepare_enable(ctx->pipe_clk);
+	if (ret)
+		goto err_core;
+
+	ret = clk_prepare_enable(ctx->dpi_clk);
+	if (ret)
+		goto err_pipe;
+
+	ctx->powered = true;
+	return 0;
+
+err_pipe:
+	clk_disable_unprepare(ctx->pipe_clk);
+err_core:
+	clk_disable_unprepare(ctx->clk);
+	return ret;
+}
+
+static void sprd_dpu_clk_off(struct dpu_context *ctx)
+{
+	if (!ctx->powered)
+		return;
+
+	clk_disable_unprepare(ctx->dpi_clk);
+	clk_disable_unprepare(ctx->pipe_clk);
+	clk_disable_unprepare(ctx->clk);
+	ctx->powered = false;
+}
+
 static void sprd_dpi_init(struct sprd_dpu *dpu)
 {
 	struct dpu_context *ctx = &dpu->ctx;
@@ -625,6 +670,9 @@ void sprd_dpu_run(struct sprd_dpu *dpu)
 void sprd_dpu_stop(struct sprd_dpu *dpu)
 {
 	struct dpu_context *ctx = &dpu->ctx;
+
+	if (!ctx->powered)
+		return;
 
 	if (ctx->if_type == SPRD_DPU_IF_DPI)
 		dpu_reg_set(ctx, REG_DPU_CTRL, BIT_DPU_STOP);
@@ -664,6 +712,9 @@ static void sprd_plane_atomic_update(struct drm_plane *drm_plane,
 									   drm_plane);
 	struct sprd_dpu *dpu = to_sprd_crtc(new_state->crtc);
 
+	if (!dpu->ctx.powered)
+		return;
+
 	/* start configure dpu layers */
 	sprd_dpu_layer(dpu, new_state);
 }
@@ -674,6 +725,9 @@ static void sprd_plane_atomic_disable(struct drm_plane *drm_plane,
 	struct drm_plane_state *old_state = drm_atomic_get_old_plane_state(state,
 									   drm_plane);
 	struct sprd_dpu *dpu = to_sprd_crtc(old_state->crtc);
+
+	if (!dpu->ctx.powered)
+		return;
 
 	layer_reg_wr(&dpu->ctx, REG_LAY_CTRL, 0x00, old_state->zpos);
 }
@@ -763,13 +817,20 @@ static void sprd_crtc_mode_set_nofb(struct drm_crtc *crtc)
 			dpu->ctx.if_type = SPRD_DPU_IF_EDPI;
 	}
 
-	sprd_dpi_init(dpu);
+	/* atomic_enable re-applies it after the DPU reset */
+	if (dpu->ctx.powered)
+		sprd_dpi_init(dpu);
 }
 
 static void sprd_crtc_atomic_enable(struct drm_crtc *crtc,
 				    struct drm_atomic_commit *state)
 {
 	struct sprd_dpu *dpu = to_sprd_crtc(crtc);
+
+	if (sprd_dpu_clk_on(&dpu->ctx)) {
+		drm_err(dpu->drm, "failed to enable dpu clocks\n");
+		return;
+	}
 
 	sprd_dpu_init(dpu);
 
@@ -785,6 +846,7 @@ static void sprd_crtc_atomic_disable(struct drm_crtc *crtc,
 	drm_crtc_vblank_off(&dpu->base);
 
 	sprd_dpu_fini(dpu);
+	sprd_dpu_clk_off(&dpu->ctx);
 
 	spin_lock_irq(&drm->event_lock);
 	if (crtc->state->event) {
@@ -801,7 +863,8 @@ static void sprd_crtc_atomic_flush(struct drm_crtc *crtc,
 	struct sprd_dpu *dpu = to_sprd_crtc(crtc);
 	struct drm_device *drm = dpu->base.dev;
 
-	sprd_dpu_flip(dpu);
+	if (dpu->ctx.powered)
+		sprd_dpu_flip(dpu);
 
 	spin_lock_irq(&drm->event_lock);
 	if (crtc->state->event) {
@@ -815,7 +878,8 @@ static int sprd_crtc_enable_vblank(struct drm_crtc *crtc)
 {
 	struct sprd_dpu *dpu = to_sprd_crtc(crtc);
 
-	dpu_reg_set(&dpu->ctx, REG_DPU_INT_EN, BIT_DPU_INT_VSYNC);
+	if (dpu->ctx.powered)
+		dpu_reg_set(&dpu->ctx, REG_DPU_INT_EN, BIT_DPU_INT_VSYNC);
 
 	return 0;
 }
@@ -824,7 +888,8 @@ static void sprd_crtc_disable_vblank(struct drm_crtc *crtc)
 {
 	struct sprd_dpu *dpu = to_sprd_crtc(crtc);
 
-	dpu_reg_clr(&dpu->ctx, REG_DPU_INT_EN, BIT_DPU_INT_VSYNC);
+	if (dpu->ctx.powered)
+		dpu_reg_clr(&dpu->ctx, REG_DPU_INT_EN, BIT_DPU_INT_VSYNC);
 }
 
 static const struct drm_crtc_helper_funcs sprd_crtc_helper_funcs = {
@@ -926,7 +991,7 @@ static int sprd_dpu_context_init(struct sprd_dpu *dpu,
 	if (ctx->irq < 0)
 		return ctx->irq;
 
-	ctx->clk = devm_clk_get_optional_enabled(dev, "core");
+	ctx->clk = devm_clk_get_optional(dev, "core");
 	if (IS_ERR(ctx->clk)) {
 		dev_err(dev, "failed to get DPU core clock\n");
 		return PTR_ERR(ctx->clk);
@@ -943,7 +1008,7 @@ static int sprd_dpu_context_init(struct sprd_dpu *dpu,
 	 * leaving the bootloader's rate in place; with proper PM that
 	 * stops working.
 	 */
-	ctx->pipe_clk = devm_clk_get_optional_enabled(dev, "clk");
+	ctx->pipe_clk = devm_clk_get_optional(dev, "clk");
 	if (IS_ERR(ctx->pipe_clk)) {
 		dev_err(dev, "failed to get DPU pipeline clock\n");
 		return PTR_ERR(ctx->pipe_clk);
@@ -966,7 +1031,7 @@ static int sprd_dpu_context_init(struct sprd_dpu *dpu,
 	 * the DSI controller, which then never asserts ready and the
 	 * DPU<->DSI halt handshake stalls forever.
 	 */
-	ctx->dpi_clk = devm_clk_get_optional_enabled(dev, "dpi");
+	ctx->dpi_clk = devm_clk_get_optional(dev, "dpi");
 	if (IS_ERR(ctx->dpi_clk)) {
 		dev_err(dev, "failed to get DPU dpi clock\n");
 		return PTR_ERR(ctx->dpi_clk);
@@ -996,6 +1061,13 @@ static int sprd_dpu_context_init(struct sprd_dpu *dpu,
 			ctx->rst_offset = args[0];
 			ctx->rst_mask = args[1];
 		}
+	}
+
+	/* on from here until the first CRTC disable (bootloader splash) */
+	ret = sprd_dpu_clk_on(ctx);
+	if (ret) {
+		dev_err(dev, "failed to enable DPU clocks\n");
+		return ret;
 	}
 
 	/* disable and clear interrupts before register dpu IRQ. */
@@ -1038,8 +1110,10 @@ static int sprd_dpu_bind(struct device *dev, struct device *master, void *data)
 
 	if (device_iommu_mapped(dev)) {
 		ret = sprd_drm_iommu_attach(drm, dev);
-		if (ret)
+		if (ret) {
+			sprd_dpu_clk_off(&dpu->ctx);
 			return ret;
+		}
 	}
 
 	return 0;
@@ -1049,8 +1123,10 @@ static void sprd_dpu_unbind(struct device *dev,
 			    struct device *master, void *data)
 {
 	struct drm_device *drm = data;
+	struct sprd_dpu *dpu = dev_get_drvdata(dev);
 
 	sprd_drm_iommu_detach(drm, dev);
+	sprd_dpu_clk_off(&dpu->ctx);
 }
 
 static const struct component_ops dpu_component_ops = {
