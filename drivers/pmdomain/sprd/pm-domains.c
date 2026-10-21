@@ -165,7 +165,7 @@ generic_pm_domain *sprd_pmu_add_one_domain(struct sprd_pmu *pmu, struct device_n
 	if (SPRD_PD_CAPS(pd, SPRD_PD_ACTIVE_WAKEUP))
 		pd->genpd.flags |= GENPD_FLAG_ACTIVE_WAKEUP;
 
-	pm_genpd_init(&pd->genpd, NULL, true);
+	pm_genpd_init(&pd->genpd, NULL, false);
 
 	pmu->domains[id] = &pd->genpd;
 

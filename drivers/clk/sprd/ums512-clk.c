@@ -2281,6 +2281,7 @@ static struct platform_driver ums512_clk_driver = {
 	.driver	= {
 		.name	= "ums512-clk",
 		.of_match_table	= sprd_ums512_clk_ids,
+		.pm	= pm_ptr(&sprd_clk_pm_ops),
 	},
 };
 module_platform_driver(ums512_clk_driver);

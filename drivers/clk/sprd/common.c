@@ -47,6 +47,7 @@ int sprd_clk_regmap_init(struct platform_device *pdev,
 	struct regmap *regmap;
 	struct resource *res;
 	struct regmap_config reg_config = sprdclk_regmap_config;
+	int ret;
 
 	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
 
@@ -82,10 +83,19 @@ int sprd_clk_regmap_init(struct platform_device *pdev,
 	sprd_clk_set_regmap(desc, regmap);
 	platform_set_drvdata(pdev, regmap);
 
-	data->gate_clk = devm_clk_get_optional_enabled(&pdev->dev, "enable");
+	/*
+	 * The probe-time enable is the runtime-active reference: the first
+	 * runtime suspend drops it.  A devm-held enable on top would keep the
+	 * gate (and its parent, e.g. mm-eb) on for good.
+	 */
+	data->gate_clk = devm_clk_get_optional(&pdev->dev, "enable");
 	if (IS_ERR(data->gate_clk))
 		return dev_err_probe(dev, PTR_ERR(data->gate_clk),
 				     "failed to get register gate clock\n");
+
+	ret = clk_prepare_enable(data->gate_clk);
+	if (ret)
+		return ret;
 
 	data->regmap = regmap;
 	platform_set_drvdata(pdev, data);
