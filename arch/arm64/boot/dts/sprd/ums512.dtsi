@@ -2647,6 +2647,13 @@
 					 <&ap_clk CLK_DISPC0>,
 					 <&ap_clk CLK_DISPC0_DPI>;
 				clock-names = "core", "clk", "dpi";
+				/*
+				 * The DPI mux resets to source 5, which the clock
+				 * driver doesn't list, so the clock is an orphan and
+				 * set_rate fails. u-boot used to pick 153.6 MHz.
+				 */
+				assigned-clocks = <&ap_clk CLK_DISPC0_DPI>;
+				assigned-clock-parents = <&pll2 CLK_TWPLL_153M6>;
 				iommus = <&iommu_disp>;
 				status = "disabled";
 
