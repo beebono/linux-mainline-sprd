@@ -406,23 +406,9 @@ static int generic_panel_init_sequence(struct generic_panel *ctx)
 }
 
 /*
- * Assume u-boot left the panel fully initialized and skip the kernel's first
- * prepare/unprepare cycle. The kernel's panel-side teardown was destroying
- * u-boot's state; skipping it is REQUIRED for the panel to light (build #76:
- * fbcon visible + boot to Debian login). sprd_dpu/sprd_dsi still reset
- * themselves -- this only isolates the panel-side contribution.
- *
- * DO NOT set this to false except as a deliberate last-resort diagnostic, or
- * once we are extremely confident the kernel can cold-init the panel without
- * u-boot's state. Flipping it to false is exactly what regressed the display
- * from the working #67 prehandoff image to a black kernel-native path.
- * See DISPLAY-KNOWN-GOOD-DSI-STATE.md / WHAT-HAS-BEEN-TRIED.md.
- *
- * CURRENTLY false ON PURPOSE for the prepare_prev_first cold-init experiment
- * (paired with ctx->panel.prepare_prev_first = true in probe). This is the
- * deliberate cold-init diagnostic the warning above refers to. Recovery if the
- * panel stays black is a reboot to the on-disk image. Set back to true to
- * restore the known-good U-Boot-handoff display.
+ * For a u-boot splash handoff: skip the first prepare/unprepare so the
+ * panel state u-boot left is not torn down. Cold boots (no u-boot) need
+ * this false so the kernel sends the init sequence itself.
  */
 static bool handoff_skip_first_cycle = false;
 
@@ -768,23 +754,10 @@ static int generic_panel_probe(struct mipi_dsi_device *dsi)
     dev_info(dev, "lanes %d, format %d, mode %lx\n", dsi->lanes, dsi->format, dsi->mode_flags);
 
     /*
-     * COLD-INIT EXPERIMENT (see WHAT-HAS-BEEN-TRIED.md "prepare_prev_first").
-     *
-     * The DRM bridge chain is encoder -> sprd_dsi.bridge -> panel_bridge(this).
-     * drm_atomic_bridge_chain_pre_enable() walks the chain in reverse, so by
-     * default THIS panel's prepare (which sends the 144-cmd init sequence) runs
-     * BEFORE sprd_dsi_bridge_pre_enable() has reset/initialised the DSI host or
-     * armed LP command mode -- and sprd_dsi then resets the controller, wiping
-     * whatever the panel just sent. That is the inverted ordering that makes
-     * cold kernel-native init fail while the U-Boot handoff path (which skips
-     * prepare entirely) works.
-     *
-     * Setting prepare_prev_first propagates to pre_enable_prev_first on the
-     * panel bridge (drm/bridge/panel.c), forcing sprd_dsi_bridge_pre_enable()
-     * to run FIRST: controller up + LP command mode armed, THEN this panel's
-     * init DCS -- matching the vendor U-Boot order (controller init, LP cmd
-     * enable, init cmds, video mode, hs clk). Only meaningful with
-     * handoff_skip_first_cycle = false.
+     * The bridge chain pre-enables in reverse, so without this the panel's
+     * init DCS goes out before sprd_dsi has brought the host up, and the
+     * host reset then wipes it. Run the DSI pre_enable first, as u-boot
+     * does: host init, LP command mode, init commands, then video mode.
      */
     ctx->panel.prepare_prev_first = true;
 
