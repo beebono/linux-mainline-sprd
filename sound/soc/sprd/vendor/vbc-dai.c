@@ -7623,9 +7623,12 @@ static int scene_normal_trigger(struct snd_pcm_substream *substream, int cmd,
 			normal_vbc_protect_spin_lock(stream);
 			is_started = get_normal_p_running_status(stream);
 			if ((is_playback && is_started) ||
-				!is_playback)
+				!is_playback) {
 				ap_trigger(vbc_codec, scene_id, stream,
 					   vbc_chan, up_down);
+				ret = dsp_trigger(vbc_codec, scene_id,
+						  stream, up_down);
+			}
 			normal_vbc_protect_spin_unlock(stream);
 		}
 		trigger_unlock_spin(scene_id, stream);
