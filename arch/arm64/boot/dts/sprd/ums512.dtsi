@@ -2683,7 +2683,7 @@
 				 * power up the analog driver.
 				 */
 				sprd,phy-en-syscon = <&ap_ahb_regs 0x40 0x03>;
-				sprd,phy-pwr-syscon = <&ap_apb_regs 0x35c 0x08>;
+				sprd,phy-pwr-syscon = <&pmu_apb_regs 0x35c 0x08>;
 				status = "disabled";
 
 				ports {
