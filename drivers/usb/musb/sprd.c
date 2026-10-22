@@ -452,8 +452,35 @@ static int sprd_musb_resume(struct device *dev)
 	return sprd_otg_switch_set(glue, role);
 }
 
-static DEFINE_SIMPLE_DEV_PM_OPS(sprd_musb_pm_ops, sprd_musb_suspend,
-				sprd_musb_resume);
+/*
+ * The controller's UTMI clock (AON APB_EB1 OTG_UTMI_EB) is enabled at probe
+ * and was never released, so the PMU saw the USB master as busy and never
+ * put the PUB (DDR) into deep sleep - the same state stock Android is in
+ * with a cable plugged in. By the noirq phase the musb core has suspended
+ * and the role above has been dropped, so nothing touches the controller
+ * until resume_noirq turns the clock back on.
+ */
+static int sprd_musb_suspend_noirq(struct device *dev)
+{
+	struct sprd_glue *glue = dev_get_drvdata(dev);
+
+	clk_disable_unprepare(glue->clk);
+
+	return 0;
+}
+
+static int sprd_musb_resume_noirq(struct device *dev)
+{
+	struct sprd_glue *glue = dev_get_drvdata(dev);
+
+	return clk_prepare_enable(glue->clk);
+}
+
+static const struct dev_pm_ops sprd_musb_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(sprd_musb_suspend, sprd_musb_resume)
+	NOIRQ_SYSTEM_SLEEP_PM_OPS(sprd_musb_suspend_noirq,
+				  sprd_musb_resume_noirq)
+};
 
 #ifdef CONFIG_OF
 static const struct of_device_id sprd_musb_match[] = {
