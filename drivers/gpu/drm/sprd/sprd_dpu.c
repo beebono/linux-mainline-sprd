@@ -57,6 +57,9 @@
 #define REG_DPI_H_TIMING	0x1F4
 #define REG_DPI_V_TIMING	0x1F8
 
+/* Enhancement (gamma, color matrix, HSV, SLP, ...) enables */
+#define REG_DPU_ENHANCE_CFG	0x200
+
 /* Global control bits */
 #define BIT_DPU_RUN			BIT(0)
 #define BIT_DPU_STOP			BIT(1)
@@ -462,6 +465,15 @@ static void sprd_dpu_init(struct sprd_dpu *dpu)
 
 	/* clear the bootloader's pinned state so our config can latch */
 	sprd_dpu_reset(ctx);
+
+	/*
+	 * The soft reset doesn't touch the enhancement block, which powers up
+	 * enabled (0x7a) with random coefficients and scrambles the colors.
+	 * u-boot used to leave it off; nothing here programs it, so keep it
+	 * bypassed. It must be written before sprd_dpi_init(): changed after
+	 * the DPI setup, the DPU underflows and holds the last pixel.
+	 */
+	writel(0x00, ctx->base + REG_DPU_ENHANCE_CFG);
 
 	/*
 	 * The reset above wipes every DPU register, including the panel size
