@@ -8212,6 +8212,14 @@ static struct snd_soc_dai_ops recognise_capture_ops = {
 };
 
 /* fast */
+/* FAST playback hw params, replayed to the dsp after a suspend (vbc_pm_resume) */
+static struct {
+	int chan_cnt;
+	u32 rate;
+	int data_fmt;
+	bool valid;
+} fast_p_params;
+
 static int scene_fast_startup(struct snd_pcm_substream *substream,
 			      struct snd_soc_dai *dai)
 {
@@ -8311,6 +8319,12 @@ static int scene_fast_hw_params(struct snd_pcm_substream *substream,
 	if (chan_cnt > 2)
 		pr_warn("%s channel count invalid\n", __func__);
 
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		fast_p_params.chan_cnt = chan_cnt;
+		fast_p_params.rate = rate;
+		fast_p_params.data_fmt = data_fmt;
+		fast_p_params.valid = true;
+	}
 	hw_param_lock_mtx(scene_id, stream);
 	hw_param_add_ref(scene_id, stream);
 	if (hw_param_get_ref(scene_id, stream) == 1) {
@@ -12984,11 +12998,95 @@ static const struct of_device_id vbc_of_match[] = {
 MODULE_DEVICE_TABLE(of, vbc_of_match);
 #endif
 
+/*
+ * System suspend of the FAST playback scene (the one the pipewire speaker
+ * node uses) and of the AGDSP itself.
+ *
+ * The AGDSP has to power its domain off for the chip to reach deep sleep with
+ * the 26 MHz crystal in low-current mode (agdsp_sleep_enter()). It does that by
+ * itself once the AP access bridge is released, but the vendor only tells it
+ * to stop for the NORMAL scenes (normal_suspend(), from the component
+ * .suspend). So:
+ *   .suspend        stop the FAST stream on the dsp (ipc, needs irqs)
+ *   .suspend_noirq  release the bridge, wait for the domain to power off -
+ *                   after every normal-phase AGCP access (dma, clock gates)
+ *   .resume_noirq   bridge back + mailbox wake, before any of them resume
+ *   .resume         replay the FAST startup and hw params; dsp_startup()
+ *                   also restores the AG IIS0 route and the codec registers;
+ *                   then the mcdt channels, which lost their set-up too.
+ * The PM_POST_SUSPEND rearm in sprd-dmaengine-pcm then retriggers the stream.
+ */
+static bool fast_p_suspended, agdsp_slept, agdsp_was_off;
+
+static int vbc_pm_suspend(struct device *dev)
+{
+	struct vbc_codec_priv *vbc_codec = dev_get_drvdata(dev);
+	int scene_id = VBC_DAI_ID_FAST_P;
+	int stream = SNDRV_PCM_STREAM_PLAYBACK;
+
+	startup_lock_mtx(scene_id, stream);
+	if (startup_get_ref(scene_id, stream) > 0) {
+		dsp_shutdown(vbc_codec, scene_id, stream);
+		fast_p_suspended = true;
+	}
+	startup_unlock_mtx(scene_id, stream);
+
+	return 0;
+}
+
+static int vbc_pm_suspend_noirq(struct device *dev)
+{
+	agdsp_slept = !agdsp_sleep_enter(300);
+
+	return 0;
+}
+
+static int vbc_pm_resume_noirq(struct device *dev)
+{
+	if (agdsp_slept)
+		agdsp_sleep_exit();
+	agdsp_was_off = agdsp_slept;
+	agdsp_slept = false;
+
+	return 0;
+}
+
+static int vbc_pm_resume(struct device *dev)
+{
+	struct vbc_codec_priv *vbc_codec = dev_get_drvdata(dev);
+	int scene_id = VBC_DAI_ID_FAST_P;
+	int stream = SNDRV_PCM_STREAM_PLAYBACK;
+
+	if (fast_p_suspended) {
+		fast_p_suspended = false;
+		startup_lock_mtx(scene_id, stream);
+		if (startup_get_ref(scene_id, stream) > 0 &&
+		    !dsp_startup(vbc_codec, scene_id, stream) &&
+		    fast_p_params.valid)
+			dsp_hw_params(vbc_codec, scene_id, stream,
+				      fast_p_params.chan_cnt, fast_p_params.rate,
+				      fast_p_params.data_fmt);
+		startup_unlock_mtx(scene_id, stream);
+	}
+	/* the mcdt lost its channel set-up with the domain power */
+	if (agdsp_was_off)
+		mcdt_restore_dma_channels();
+	agdsp_was_off = false;
+
+	return 0;
+}
+
+static const struct dev_pm_ops vbc_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(vbc_pm_suspend, vbc_pm_resume)
+	NOIRQ_SYSTEM_SLEEP_PM_OPS(vbc_pm_suspend_noirq, vbc_pm_resume_noirq)
+};
+
 static struct platform_driver vbc_driver = {
 	.driver = {
 		.name = "vbc-v4",
 		.owner = THIS_MODULE,
 		.of_match_table = vbc_of_match,
+		.pm = pm_sleep_ptr(&vbc_pm_ops),
 	},
 
 	.probe = vbc_drv_probe,

@@ -18,6 +18,7 @@
 #include <linux/hwspinlock.h>
 #include <linux/io.h>
 #include <linux/kthread.h>
+#include <linux/ktime.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -618,6 +619,102 @@ exit:
 }
 EXPORT_SYMBOL(restore_access);
 
+
+/*
+ * System suspend: let the AGDSP power its domain off by itself, the way stock
+ * does with an idle DSP. The AUDCP system votes for the 26 MHz crystal (PMU
+ * XTL0_REL_CFG AUDCP_SYS_SEL), so unless the domain is really off the XO never
+ * drops to low current. Forcing it off (AUDCP_FORCE_DEEP_SLEEP + auto
+ * shutdown) loses the DSP's state; releasing the AP access bit lets the
+ * firmware save it and sleep (~0.1 s measured), and the PMU then cuts power.
+ *
+ * Call from a noirq callback only: once the bit is clear, any access to the
+ * AGCP address space hangs the bus until agdsp_sleep_exit().
+ */
+#define REG_PMU_PD_AUDCP_AUDDSP_CFG	0x005c
+#define REG_PMU_PD_AUDCP_SYS_CFG	0x0060
+#define REG_PMU_AUDCP_SYS_DSLP_ENA	0x0244
+#define REG_PMU_AUDCP_AUDDSP_DSLP_ENA	0x0248
+#define PMU_PD_AUTO_SHUTDOWN		BIT(24)
+#define PD_OFF_STATE			7
+
+static void agdsp_sleep_cfg(struct agdsp_access *dsp_ac, bool on)
+{
+	regmap_update_bits(dsp_ac->pmu_apb, REG_PMU_PD_AUDCP_AUDDSP_CFG,
+			   PMU_PD_AUTO_SHUTDOWN, on ? PMU_PD_AUTO_SHUTDOWN : 0);
+	regmap_update_bits(dsp_ac->pmu_apb, REG_PMU_PD_AUDCP_SYS_CFG,
+			   PMU_PD_AUTO_SHUTDOWN, on ? PMU_PD_AUTO_SHUTDOWN : 0);
+	regmap_write(dsp_ac->pmu_apb, REG_PMU_AUDCP_SYS_DSLP_ENA, on);
+	regmap_write(dsp_ac->pmu_apb, REG_PMU_AUDCP_AUDDSP_DSLP_ENA, on);
+}
+
+static int agdsp_pd_state(struct agdsp_access *dsp_ac)
+{
+	unsigned int val = 0;
+
+	regmap_read(dsp_ac->pmu_apb, dsp_ac->audcp_pmu_pwr_status4_reg, &val);
+	return (val & dsp_ac->audcp_pmu_sys_slp_state_mask) >>
+	       (ffs(dsp_ac->audcp_pmu_sys_slp_state_mask) - 1);
+}
+
+int agdsp_sleep_enter(unsigned int timeout_ms)
+{
+	struct agdsp_access *dsp_ac = g_agdsp_access;
+	ktime_t end = ktime_add_ms(ktime_get(), timeout_ms);
+
+	if (!dsp_ac || !dsp_ac->ready)
+		return -EINVAL;
+
+	agdsp_sleep_cfg(dsp_ac, true);
+	regmap_update_bits(dsp_ac->agcp_ahb, dsp_ac->ap_access_ena_reg,
+			   dsp_ac->ap_access_ena_mask, 0);
+	while (agdsp_pd_state(dsp_ac) != PD_OFF_STATE) {
+		if (ktime_after(ktime_get(), end)) {
+			/* never powered off: put the bridge back as it was */
+			regmap_update_bits(dsp_ac->agcp_ahb,
+					   dsp_ac->ap_access_ena_reg,
+					   dsp_ac->ap_access_ena_mask,
+					   dsp_ac->ap_access_ena_mask);
+			agdsp_sleep_cfg(dsp_ac, false);
+			pr_warn("%s: agdsp did not power off in %u ms\n",
+				__func__, timeout_ms);
+			return -ETIMEDOUT;
+		}
+		usleep_range(500, 1000);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(agdsp_sleep_enter);
+
+/* Undo agdsp_sleep_enter(): bridge back, mailbox wake (100 = no-op command), wait for power-up. */
+int agdsp_sleep_exit(void)
+{
+	struct agdsp_access *dsp_ac = g_agdsp_access;
+	static unsigned long long wake_msg = 100;
+	ktime_t end;
+
+	if (!dsp_ac || !dsp_ac->ready)
+		return -EINVAL;
+
+	regmap_update_bits(dsp_ac->agcp_ahb, dsp_ac->ap_access_ena_reg,
+			   dsp_ac->ap_access_ena_mask, dsp_ac->ap_access_ena_mask);
+	mbox_send_message(g_agdsp_mboxchan, &wake_msg);
+	mbox_chan_txdone(g_agdsp_mboxchan, 0);
+	end = ktime_add_ms(ktime_get(), 100);
+	while (agdsp_pd_state(dsp_ac) != PD_WAKEUP_STATE) {
+		if (ktime_after(ktime_get(), end)) {
+			pr_err("%s: agdsp did not power up\n", __func__);
+			agdsp_sleep_cfg(dsp_ac, false);
+			return -ETIMEDOUT;
+		}
+		udelay(5);
+	}
+	agdsp_sleep_cfg(dsp_ac, false);
+
+	return 0;
+}
+EXPORT_SYMBOL(agdsp_sleep_exit);
 
 int disable_access_force(void)
 {

@@ -1069,6 +1069,7 @@ int mcdt_dac_dma_enable(unsigned int channel, unsigned int emptymark)
 			__func__, __LINE__, dma_channel);
 		g_dac_channel[channel].dma_enabled = 1;
 		g_dac_channel[channel].dma_channel = dma_channel;
+		g_dac_channel[channel].wmk = emptymark;
 	}
 
 	return uid;
@@ -1109,6 +1110,7 @@ int mcdt_adc_dma_enable(unsigned int channel, unsigned int fullmark)
 			__func__, __LINE__, dma_channel);
 		g_adc_channel[channel].dma_enabled = 1;
 		g_adc_channel[channel].dma_channel = dma_channel;
+		g_adc_channel[channel].wmk = fullmark;
 	}
 
 	return uid;
@@ -1366,6 +1368,40 @@ static int mcdt_probe(struct platform_device *pdev)
 
 	return 0;
 }
+
+/*
+ * The MCDT sits in the AUDCP power domain, which is off while the system
+ * sleeps (the AGDSP powers it down, see agdsp_sleep_enter()), so every channel
+ * set-up is gone at resume and a stream that stayed open never gets another
+ * dma request. Put back what mcdt_{dac,adc}_dma_enable() programmed; the
+ * channel bookkeeping itself is still valid. Called from vbc_pm_resume() once
+ * the dsp is awake again: it is the dsp firmware that turns the mcdt clock
+ * (audcp-mcdt-eb) on, and every register access here checks it.
+ */
+void mcdt_restore_dma_channels(void)
+{
+	int i;
+
+	for (i = 0; i < dac_channel_max; i++) {
+		if (!g_dac_channel[i].dma_enabled)
+			continue;
+		mcdt_da_fifo_clr(i);
+		mcdt_da_set_watermark(i, FIFO_LENGTH - 1, g_dac_channel[i].wmk);
+		mcdt_send_data_use_dma(i, g_dac_channel[i].dma_channel);
+		pr_info("%s dac chan %d dma %d restored\n", __func__, i,
+			g_dac_channel[i].dma_channel);
+	}
+	for (i = 0; i < adc_channel_max; i++) {
+		if (!g_adc_channel[i].dma_enabled)
+			continue;
+		mcdt_ad_fifo_clr(i);
+		mcdt_ad_set_watermark(i, g_adc_channel[i].wmk, FIFO_LENGTH - 1);
+		mcdt_rev_data_use_dma(i, g_adc_channel[i].dma_channel);
+		pr_info("%s adc chan %d dma %d restored\n", __func__, i,
+			g_adc_channel[i].dma_channel);
+	}
+}
+EXPORT_SYMBOL(mcdt_restore_dma_channels);
 
 static const struct of_device_id mcdt_of_match[] = {
 	{.compatible = "unisoc,sharkl5-mcdt", },

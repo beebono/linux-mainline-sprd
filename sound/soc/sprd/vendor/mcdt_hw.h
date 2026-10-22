@@ -40,6 +40,7 @@ struct channel_status {
 	int dma_enabled;
 	int dma_channel;
 	int int_count;
+	unsigned int wmk;	/* dma watermark, re-applied on resume */
 };
 
 enum MCDT_CHAN_NUM {
@@ -111,6 +112,7 @@ int mcdt_write(unsigned int channel, char *pTxBuf, unsigned int size);
 int mcdt_read(unsigned int channel, char *pRxBuf, unsigned int size);
 
 int mcdt_dac_dma_enable(unsigned int channel, unsigned int emptymark);
+void mcdt_restore_dma_channels(void);
 
 int mcdt_adc_dma_enable(unsigned int channel, unsigned int fullmark);
 

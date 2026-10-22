@@ -22,6 +22,8 @@ int agdsp_can_access(void);
 int force_on_xtl(bool on_off);
 int disable_access_force(void);
 int restore_access(void);
+int agdsp_sleep_enter(unsigned int timeout_ms);
+int agdsp_sleep_exit(void);
 void agdsp_set_mboxchan(struct mbox_chan *mboxchan);
 void agdsp_access_dumpreg(void);
 
