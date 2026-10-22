@@ -2661,6 +2661,9 @@
 				compatible = "sprd,ums512-iommu", "sprd,iommu-v1";
 				reg = <0x20300800 0x80>;
 				sprd,iova-range = <0x90000000 0x10000000>;
+				/* Shares the DPU's AHB gate: with it off (no u-boot
+				 * splash left running) the first register read aborts. */
+				clocks = <&apahb_gate CLK_DISPC_EB>;
 				#iommu-cells = <0>;
 				status = "disabled";
 			};
