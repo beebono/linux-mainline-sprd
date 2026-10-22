@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Anbernic RG Rotate, standalone CFW boot: the SPL loads the kernel straight
+ * from eMMC with no SML/TOS secure world and no u-boot. Everything that only
+ * existed for those (and for the modem/wcn, which this build does not use) is
+ * handed back to Linux. The audio carveouts and pm_sys regions stay; they live
+ * in ums512.dtsi.
+ */
+
+#include "ums512-rg-rotate.dts"
+
+/ {
+	model = "Anbernic RG Rotate (CFW)";
+
+	/* No bootloader to supply a command line. maxcpus=1 until the SPL
+	 * powers up the secondaries. Bring-up: console on both the USB serial
+	 * gadget and the panel; go back to "quiet loglevel=0" once it boots.
+	 * panic=5: once sprd_wdt owns the watchdog a panic would halt forever;
+	 * reboot through the sc27xx restart handler so the SPL can rescue the
+	 * ramoops console. printk.devkmsg=on: no rate limit on /dev/kmsg, so
+	 * the init trace is complete. */
+	chosen {
+		bootargs = "maxcpus=1 panic=5 printk.devkmsg=on console=ttyGS0,115200 console=tty0 loglevel=7 fbcon=font:TER16x32";
+	};
+
+	/* No EL3 firmware means no PSCI: secondaries are parked by the SPL
+	 * and released through spin-table. */
+	/delete-node/ psci;
+	/delete-node/ idle-states;
+};
+
+&{/reserved-memory} {
+	/delete-node/ cp-mem@89600000;
+	/delete-node/ sipc-mem@8e000000;
+	/delete-node/ iq-mem@90000000;
+	/delete-node/ sml-mem@94000000;
+	/delete-node/ tos-mem@94040000;
+	/delete-node/ sh-mem@9a000000;
+	/delete-node/ uboot-log@9de80000;
+	/delete-node/ framebuffer-region@9e000000;
+	/delete-node/ logobuffer-tail@9e1fa400;
+	/delete-node/ sysdump-uboot@9f000000;
+	/delete-node/ widevine-mem@e3800000;
+	/delete-node/ faceid-mem@fd270000;
+	/delete-node/ vdsp-mem@fd770000;
+	/delete-node/ rebootescrow@fff70000;
+
+	/* Mailbox the SPL's parked secondaries poll; must match the SPL. */
+	spin-table@80002000 {
+		reg = <0 0x80002000 0 0x1000>;
+		no-map;
+	};
+};
+
+/* SDIO wifi (mmc1): unused on the CFW, and with no u-boot to power the
+ * module it floods the console with SDHCI register dumps. SD stays on sdio0. */
+&sdio1 {
+	status = "disabled";
+};
+
+/* The panel is brought up cold by the kernel, with no splash to inherit. */
+&dpu {
+	/delete-property/ memory-region;
+};
+
+&CPU0 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU1 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU2 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU3 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU4 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU5 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU6 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};
+
+&CPU7 {
+	enable-method = "spin-table";
+	cpu-release-addr = <0 0x80002ff8>;
+	/delete-property/ cpu-idle-states;
+};

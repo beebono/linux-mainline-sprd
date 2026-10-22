@@ -4,5 +4,6 @@ dtb-$(CONFIG_ARCH_SPRD) += sc9836-openphone.dtb 	\
 			sp9863a-1h10.dtb		\
 			ums512-1h10.dtb			\
 			ums512-rg-rotate.dtb		\
+			ums512-rg-rotate-cfw.dtb	\
 			ums9230-reeder-s19mps.dtb	\
 			ums9620-2h10.dtb
