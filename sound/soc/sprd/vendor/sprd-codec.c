@@ -4391,11 +4391,59 @@ static const struct of_device_id codec_of_match[] = {
 MODULE_DEVICE_TABLE(of, codec_of_match);
 #endif
 
+/*
+ * UCM's Mic device turns "MICBIAS1 Power" on, and WirePlumber keeps that
+ * device enabled whenever the mic source exists, so BG and MICBIAS1 (and
+ * with them BIAS and VB) stay on through system suspend: ~1.3 mA of the
+ * sleep current (plorpos-3yv.74.22). A capture takes MICBIAS1 through DAPM
+ * on its own; drop the control's hold across suspend and take it back.
+ */
+static int sprd_codec_pm_suspend(struct device *dev)
+{
+	struct sprd_codec_priv *sprd_codec = dev_get_drvdata(dev);
+
+	if (sprd_codec && sprd_codec->micbias1_power_en) {
+		regulator_disable(sprd_codec->micbias1);
+		regulator_disable(sprd_codec->bg);
+	}
+
+	return 0;
+}
+
+static int sprd_codec_pm_resume(struct device *dev)
+{
+	struct sprd_codec_priv *sprd_codec = dev_get_drvdata(dev);
+	int ret;
+
+	if (!sprd_codec || !sprd_codec->micbias1_power_en)
+		return 0;
+
+	ret = regulator_enable(sprd_codec->bg);
+	if (ret)
+		goto err;
+	ret = regulator_enable(sprd_codec->micbias1);
+	if (ret) {
+		regulator_disable(sprd_codec->bg);
+		goto err;
+	}
+
+	return 0;
+err:
+	/* the control reads off, so a later "on" takes both again */
+	sprd_codec->micbias1_power_en = false;
+	dev_err(dev, "micbias1 hold not restored: %d\n", ret);
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(sprd_codec_pm_ops, sprd_codec_pm_suspend,
+				sprd_codec_pm_resume);
+
 static struct platform_driver sprd_codec_codec_driver = {
 	.driver = {
 		.name = "sprd-codec-sc2730",
 		.owner = THIS_MODULE,
 		.of_match_table = codec_of_match,
+		.pm = pm_sleep_ptr(&sprd_codec_pm_ops),
 	},
 	.probe = sprd_codec_probe,
 	.remove = sprd_codec_remove,
