@@ -595,6 +595,53 @@ static void aw87390_i2c_remove(struct i2c_client *i2c)
 		rgds_amp = NULL;
 }
 
+/*
+ * The speaker hook leaves the RG-DS amp on for as long as the speaker path
+ * is up, and a playback stream that stays open (a resident emulator playing
+ * silence) keeps that path up through system suspend: ~6 mA of the sleep
+ * current (plorpos-3yv.74.19). Power it down across suspend and put back
+ * what was there; the vdd regulator stays as the hook left it.
+ */
+static unsigned int rgds_sysctrl;
+
+static int aw87390_suspend(struct device *dev)
+{
+	struct aw87390 *aw87390 = dev_get_drvdata(dev);
+	int ret = 0;
+
+	if (aw87390 != rgds_amp)
+		return 0;
+
+	mutex_lock(&aw87390->lock);
+	rgds_sysctrl = 0;
+	regmap_read(aw87390->aw_pa->regmap, AW87391_SYSCTRL_REG, &rgds_sysctrl);
+	if (rgds_sysctrl != AW87390_POWER_DOWN_VALUE)
+		ret = regmap_write(aw87390->aw_pa->regmap, AW87391_SYSCTRL_REG,
+				   AW87390_POWER_DOWN_VALUE);
+	mutex_unlock(&aw87390->lock);
+
+	return ret;
+}
+
+static int aw87390_resume(struct device *dev)
+{
+	struct aw87390 *aw87390 = dev_get_drvdata(dev);
+	int ret = 0;
+
+	if (aw87390 != rgds_amp)
+		return 0;
+
+	mutex_lock(&aw87390->lock);
+	if (rgds_sysctrl != AW87390_POWER_DOWN_VALUE)
+		ret = regmap_write(aw87390->aw_pa->regmap, AW87391_SYSCTRL_REG,
+				   rgds_sysctrl);
+	mutex_unlock(&aw87390->lock);
+
+	return ret;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(aw87390_pm_ops, aw87390_suspend, aw87390_resume);
+
 static const struct of_device_id aw87390_of_match[] = {
 	{ .compatible = "awinic,aw87390" },
 	{ .compatible = "anbernic,rgds-amp" },
@@ -613,6 +660,7 @@ static struct i2c_driver aw87390_i2c_driver = {
 	.driver = {
 		.name = AW87390_I2C_NAME,
 		.of_match_table = of_match_ptr(aw87390_of_match),
+		.pm = pm_sleep_ptr(&aw87390_pm_ops),
 	},
 	.probe = aw87390_i2c_probe,
 	.remove = aw87390_i2c_remove,
