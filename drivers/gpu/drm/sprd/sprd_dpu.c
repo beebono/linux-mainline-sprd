@@ -47,6 +47,9 @@
 #define REG_LAY_ALPHA		0x50
 #define REG_LAY_CROP_START	0x5C
 
+/* Hardware layers, including the two without a DRM plane */
+#define DPU_MAX_LAYERS		8
+
 /* Interrupt control registers */
 #define REG_DPU_INT_EN		0x1E0
 #define REG_DPU_INT_CLR		0x1E4
@@ -462,6 +465,7 @@ static void sprd_dpu_init(struct sprd_dpu *dpu)
 	struct dpu_context *ctx = &dpu->ctx;
 	u32 int_mask = 0;
 	u32 dpu_version;
+	int i;
 
 	/* clear the bootloader's pinned state so our config can latch */
 	sprd_dpu_reset(ctx);
@@ -474,6 +478,15 @@ static void sprd_dpu_init(struct sprd_dpu *dpu)
 	 * the DPI setup, the DPU underflows and holds the last pixel.
 	 */
 	writel(0x00, ctx->base + REG_DPU_ENHANCE_CFG);
+
+	/*
+	 * The layer registers survive the reset too, and power up with random
+	 * contents, often with the enable bit set. Only the planes in an
+	 * atomic state get programmed, so a stray layer would blend over the
+	 * picture. Disable all eight layers, as u-boot's dpu_clean() does.
+	 */
+	for (i = 0; i < DPU_MAX_LAYERS; i++)
+		layer_reg_wr(ctx, REG_LAY_CTRL, 0x00, i);
 
 	/*
 	 * The reset above wipes every DPU register, including the panel size
