@@ -112,6 +112,17 @@ static int sprd_hsphy_init(struct phy *phy)
 				  BIT_AON_APB_OTG_UTMI_SOFT_RST);
 	}
 
+	/*
+	 * Leave the analog side powered down until a role powers it on. U-Boot
+	 * leaves it on, and with no role at boot nothing calls power_off, so
+	 * it stayed on through every suspend (~0.3 mA, plorpos-3yv.74.21). The
+	 * reference clocks above stay: power_on needs them.
+	 */
+	regmap_set_bits(hsphy->ana_regs, hsphy->data->pll_reg,
+			BIT_ANLG_USB20_ISO_SW_EN);
+	regmap_set_bits(hsphy->ana_regs, hsphy->data->pd_reg,
+			BIT_ANLG_USB20_PS_PD_L | BIT_ANLG_USB20_PS_PD_S);
+
 	return 0;
 }
 
