@@ -12,20 +12,18 @@
 / {
 	model = "Anbernic RG Rotate (CFW)";
 
-	/* No bootloader to supply a command line. maxcpus=1 until the SPL
-	 * powers up the secondaries. Bring-up: console on both the USB serial
+	/* No bootloader to supply a command line. Bring-up: console on both the USB serial
 	 * gadget and the panel; go back to "quiet loglevel=0" once it boots.
 	 * panic=5: once sprd_wdt owns the watchdog a panic would halt forever;
 	 * reboot through the sc27xx restart handler so the SPL can rescue the
 	 * ramoops console. printk.devkmsg=on: no rate limit on /dev/kmsg, so
 	 * the init trace is complete. */
 	chosen {
-		bootargs = "maxcpus=1 panic=5 printk.devkmsg=on console=ttyGS0,115200 console=tty0 loglevel=7 fbcon=font:TER16x32";
+		bootargs = "panic=5 printk.devkmsg=on console=ttyGS0,115200 console=tty0 loglevel=7 fbcon=font:TER16x32";
 	};
 
-	/* No EL3 firmware means no PSCI: secondaries are parked by the SPL
-	 * and released through spin-table. */
-	/delete-node/ psci;
+	/* PSCI comes from the SPL-loaded EL3 monitor (ext/boot/spl/monitor),
+	 * which has no CPU_SUSPEND: no idle states. */
 	/delete-node/ idle-states;
 };
 
@@ -45,9 +43,17 @@
 	/delete-node/ vdsp-mem@fd770000;
 	/delete-node/ rebootescrow@fff70000;
 
-	/* Mailbox the SPL's parked secondaries poll; must match the SPL. */
-	spin-table@80002000 {
+	/* SPL's EL2 entry stub and boot records (linux_entry.S); must match
+	 * the SPL. */
+	cfw-el2-page@80002000 {
 		reg = <0 0x80002000 0 0x1000>;
+		no-map;
+	};
+
+	/* EL3 monitor (PSCI): code, stacks, and a status page at +0xf000.
+	 * Must match CFW_MON_BASE in the SPL. */
+	cfw-monitor@80100000 {
+		reg = <0 0x80100000 0 0x10000>;
 		no-map;
 	};
 };
@@ -64,49 +70,33 @@
 };
 
 &CPU0 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU1 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU2 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU3 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU4 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU5 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU6 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
 
 &CPU7 {
-	enable-method = "spin-table";
-	cpu-release-addr = <0 0x80002ff8>;
 	/delete-property/ cpu-idle-states;
 };
