@@ -12,14 +12,13 @@
 / {
 	model = "Anbernic RG Rotate (CFW)";
 
-	/* No bootloader to supply a command line. Bring-up: console on both the USB serial
-	 * gadget and the panel; go back to "quiet loglevel=0" once it boots.
-	 * panic=5: once sprd_wdt owns the watchdog a panic would halt forever;
-	 * reboot through the sc27xx restart handler so the SPL can rescue the
-	 * ramoops console. printk.devkmsg=on: no rate limit on /dev/kmsg, so
-	 * the init trace is complete. */
+	/* No bootloader to supply a command line. Console on the panel only;
+	 * dmesg is read over the USB serial shell. Go back to "quiet
+	 * loglevel=0" once RetroArch owns the panel. panic=5: once sprd_wdt
+	 * owns the watchdog a panic would halt forever; reboot through the
+	 * sc27xx restart handler instead. */
 	chosen {
-		bootargs = "panic=5 printk.devkmsg=on console=ttyGS0,115200 console=tty0 loglevel=7 fbcon=font:TER16x32";
+		bootargs = "panic=5 console=tty0 loglevel=7 fbcon=font:TER16x32";
 	};
 
 	/* PSCI comes from the SPL-loaded EL3 monitor (ext/boot/spl/monitor),
