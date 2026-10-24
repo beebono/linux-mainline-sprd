@@ -304,10 +304,17 @@ static const struct musb_hdrc_config sprd_musb_hdrc_config = {
 	.ram_bits = SPRD_MUSB_RAM_BITS,
 };
 
+/*
+ * The DMA engine addresses 36 bits: bits 32-35 of a buffer go in the
+ * linklist node's data_addr, those of the list itself in CHN_ADDR_H. A
+ * 32-bit mask here sent every buffer above 4 GiB (this board has RAM up to
+ * 0x13fffffff) through swiotlb, which stalled and eventually oopsed under
+ * mass storage.
+ */
 static const struct platform_device_info sprd_dev_info = {
 	.name = "musb-hdrc",
 	.id = PLATFORM_DEVID_AUTO,
-	.dma_mask = DMA_BIT_MASK(32),
+	.dma_mask = DMA_BIT_MASK(36),
 };
 
 static int sprd_musb_probe(struct platform_device *pdev)

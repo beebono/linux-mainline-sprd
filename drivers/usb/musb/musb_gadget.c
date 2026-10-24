@@ -252,7 +252,13 @@ static void txstate(struct musb *musb, struct musb_request *req)
 	fifo_count = min(max_ep_writesize(musb, musb_ep),
 			(int)(request->length - request->actual));
 
-	if (csr & MUSB_TXCSR_TXPKTRDY) {
+	/*
+	 * The Unisoc DMA engine paces itself on FIFO space, and in DMA mode 1
+	 * no endpoint interrupt follows a full packet, so waiting here for
+	 * the previous request's last packet to leave the FIFO would leave
+	 * the next one stranded. The vendor driver never checks this.
+	 */
+	if ((csr & MUSB_TXCSR_TXPKTRDY) && !musb_dma_sprd(musb)) {
 		musb_dbg(musb, "%s old packet still ready , txcsr %03x",
 				musb_ep->end_point.name, csr);
 		return;
@@ -559,15 +565,31 @@ static void rxstate(struct musb *musb, struct musb_request *req)
 		struct dma_controller	*c = musb->dma_controller;
 		struct dma_channel	*channel = musb_ep->dma;
 
-		csr |= MUSB_RXCSR_AUTOCLEAR | MUSB_RXCSR_DMAMODE |
-			MUSB_RXCSR_DMAENAB;
-		musb_writew(epio, MUSB_RXCSR, csr);
-
+		/*
+		 * The Unisoc engine is only reliable when its channel is
+		 * armed with a packet already in the FIFO, CHN_EN first and
+		 * DMAENAB after it: armed on an empty FIFO it ends the block
+		 * with nothing received if the packet lands right away. So
+		 * DMAENAB stays off while nothing is armed, which makes
+		 * every arriving packet raise the endpoint interrupt, and
+		 * musb_g_rx() brings us back here with the packet present.
+		 */
+		if (!(csr & MUSB_RXCSR_RXPKTRDY)) {
+			dev_dbg(musb->controller, "rx wait ep%d len %u rxcsr %04x\n",
+				epnum, request->length - request->actual, csr);
+			return;
+		}
+		dev_dbg(musb->controller, "rx arm ep%d len %u rxcsr %04x\n",
+			epnum, request->length - request->actual, csr);
 		c->channel_program(channel,
 				   musb_ep->packet_sz,
 				   0,
 				   request->dma + request->actual,
 				   request->length - request->actual);
+
+		csr |= MUSB_RXCSR_AUTOCLEAR | MUSB_RXCSR_DMAMODE |
+			MUSB_RXCSR_DMAENAB;
+		musb_writew(epio, MUSB_RXCSR, csr);
 		return;
 	}
 
@@ -1186,6 +1208,18 @@ void musb_ep_restart(struct musb *musb, struct musb_request *req)
 	musb_ep_select(musb->mregs, req->epnum);
 	if (req->tx) {
 		txstate(musb, req);
+	} else if (musb_dma_sprd(musb)) {
+		/*
+		 * The flush below drops a packet that is already in the FIFO
+		 * and waits for the next one to raise an interrupt. Mass
+		 * storage queues the data request only after reading the
+		 * CBW, by which time the host has sent (and had acked) the
+		 * data: dropping it leaves the request waiting for good. This
+		 * platform cannot PIO anyway, and its rxstate() only arms the
+		 * DMA, with the giveback coming from the DMA interrupt, so
+		 * the re-entrancy the flush guards against cannot happen.
+		 */
+		rxstate(musb, req);
 	} else {
 		csr = musb_readw(epio, MUSB_RXCSR);
 		csr |= MUSB_RXCSR_FLUSHFIFO | MUSB_RXCSR_P_WZC_BITS;

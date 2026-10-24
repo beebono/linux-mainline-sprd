@@ -14,6 +14,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include "musb_core.h"
+#include "musb_gadget.h"
 #include "sprd_dma.h"
 
 #define MAX_NODES_PER_CHANNEL 2048
@@ -21,11 +22,14 @@
 struct sprd_musb_dma_channel {
 	struct dma_channel		channel;
 	struct sprd_musb_dma_controller	*controller;
-	u32				start_addr;
 	u32				len;
 	u8				idx;
 	u8				epnum;
 	u8				transmit;
+	/* Peripheral RX: queued requests chained into the running list. */
+	unsigned int			nreqs;
+	/* Where the next list starts in this channel's node array. */
+	unsigned int			next_node;
 };
 
 struct sprd_musb_dma_controller {
@@ -102,30 +106,44 @@ static void dma_channel_release(struct dma_channel *channel)
 	channel->status = MUSB_DMA_STATUS_UNKNOWN;
 }
 
-static void configure_channel(struct dma_channel *channel,
-				dma_addr_t dma_addr, u32 len)
+/*
+ * The channel's node array, and where the next list should start in it.
+ * Lists rotate through the array rather than always starting at node 0:
+ * handed the address of the list it had just finished, the engine
+ * completed the new one at once with nothing transferred (seen right after
+ * a short packet). The vendor driver walks its array the same way.
+ */
+static struct sprd_musb_linklist_node *
+channel_linklist(struct sprd_musb_dma_channel *musb_channel, u64 *list_addr,
+		 int *start)
 {
-	struct sprd_musb_dma_channel *musb_channel = channel->private_data;
 	struct sprd_musb_dma_controller *controller = musb_channel->controller;
-	struct musb *musb = controller->private_data;
-	void __iomem *mbase = controller->base;
-	u8 bchannel = musb_channel->idx;
-	struct sprd_musb_linklist_node *linklist;
-	unsigned long ll_offset;
+	unsigned long ll_offset = sizeof(struct sprd_musb_linklist_node) *
+				  MAX_NODES_PER_CHANNEL * (musb_channel->idx - 1);
+
+	if (musb_channel->next_node > MAX_NODES_PER_CHANNEL / 2)
+		musb_channel->next_node = 0;
+	*start = musb_channel->next_node;
+	ll_offset += sizeof(struct sprd_musb_linklist_node) * *start;
+	*list_addr = (u64)controller->linklist_dma_addr + ll_offset;
+	return controller->linklist + ll_offset;
+}
+
+/*
+ * Append nodes covering [dma_addr, dma_addr + len) at index idx, none of
+ * them marked as the end of the list. Returns the number of nodes added,
+ * 0 when the list is full.
+ */
+static int add_nodes(struct sprd_musb_linklist_node *linklist, int idx,
+		     int limit, dma_addr_t dma_addr, u32 len)
+{
 	dma_addr_t next_boundary;
-	u64 list_addr;
-	u32 tmp_len, csr = 0;
-	int i = 0;
+	u32 tmp_len;
+	int n = 0;
 
-	dev_dbg(musb->controller, "%cx len=%u on channel %d\n",
-		musb_channel->transmit ? 'T' : 'R', len, bchannel);
+	while (len > 0 && idx + n < limit) {
+		struct sprd_musb_linklist_node *node = &linklist[idx + n];
 
-	ll_offset = sizeof(struct sprd_musb_linklist_node) *
-		    MAX_NODES_PER_CHANNEL * (bchannel - 1);
-	list_addr = (u64)controller->linklist_dma_addr + ll_offset;
-	linklist = controller->linklist + ll_offset;
-
-	do {
 		if (len < 0x10000)
 			tmp_len = len;
 		else
@@ -135,53 +153,143 @@ static void configure_channel(struct dma_channel *channel,
 		if ((dma_addr + tmp_len) > next_boundary)
 			tmp_len = (u32)(next_boundary - dma_addr);
 
-		linklist->addr = (u32)dma_addr;
-		linklist->data_addr = 0;
-		linklist->frag_len = 32;
-		linklist->blk_len = tmp_len;
-		linklist->list_end = tmp_len == len;
-		linklist->sp = 0;
-		linklist->ioc = linklist->list_end;
-		linklist++;
+		node->addr = (u32)dma_addr;
+		node->data_addr = (dma_addr >> 32) & 0xf;
+		node->frag_len = 32;
+		node->blk_len = tmp_len;
+		node->list_end = 0;
+		node->sp = 0;
+		node->ioc = 0;
 
 		dma_addr += tmp_len;
 		len -= tmp_len;
-		i += 1;
-	} while (len > 0 && i < MAX_NODES_PER_CHANNEL);
+		n++;
+	}
+	return n;
+}
+
+/* Hand a prepared list to the engine and enable the channel. */
+static void start_channel(struct sprd_musb_dma_channel *musb_channel,
+			  u64 list_addr)
+{
+	void __iomem *mbase = musb_channel->controller->base;
+	u8 bchannel = musb_channel->idx;
+	u32 csr;
 
 	wmb();
 
+	/*
+	 * Have the engine wait 9 more cycles before acting on the USB core's
+	 * request length. Without it, the first IN transfer of more than one
+	 * packet stalled (mass storage; ACM never sends more than a packet per
+	 * request). The vendor driver writes it at every channel allocation;
+	 * writing it at every start also survives a controller reset.
+	 */
+	musb_writel(mbase, MUSB_DMA_FRAG_WAIT, 0x8);
+
 	/* set linklist pointer */
 	musb_writel(mbase, MUSB_DMA_CHN_LLIST_PTR(bchannel), (u32)list_addr);
-	musb_writel(mbase, MUSB_DMA_CHN_ADDR_H(bchannel), 0);
+	musb_writel(mbase, MUSB_DMA_CHN_ADDR_H(bchannel),
+		    ((list_addr >> 32) & 0xf) << 4);
 
 	if (musb_channel->transmit) {
 		/* enable linklist end interrupt */
 		csr = musb_readl(mbase, MUSB_DMA_CHN_INTR(bchannel));
 		csr |= CHN_LLIST_INT_EN | CHN_CLEAR_INT_EN;
 		musb_writel(mbase, MUSB_DMA_CHN_INTR(bchannel), csr);
-
-		/* enable channel and trigger tx dma transfer */
-		csr = musb_readl(mbase, MUSB_DMA_CHN_PAUSE(bchannel));
-		if (csr & CHN_CLR)
-			musb_writel(mbase, MUSB_DMA_CHN_PAUSE(bchannel), 0);
-		csr = musb_readl(mbase, MUSB_DMA_CHN_CFG(bchannel));
-		csr |= CHN_EN;
-		musb_writel(mbase, MUSB_DMA_CHN_CFG(bchannel), csr);
 	} else {
 		/* enable linklist end and rx last interrupt */
 		csr = musb_readl(mbase, MUSB_DMA_CHN_INTR(bchannel));
 		csr |= CHN_USBRX_INT_EN | CHN_LLIST_INT_EN | CHN_CLEAR_INT_EN;
 		musb_writel(mbase, MUSB_DMA_CHN_INTR(bchannel), csr);
-
-		/* enable channel and trigger rx dma transfer */
-		csr = musb_readl(mbase, MUSB_DMA_CHN_PAUSE(bchannel));
-		if (csr & CHN_CLR)
-			musb_writel(mbase, MUSB_DMA_CHN_PAUSE(bchannel), 0);
-		csr = musb_readl(mbase, MUSB_DMA_CHN_CFG(bchannel));
-		csr |= CHN_EN;
-		musb_writel(mbase, MUSB_DMA_CHN_CFG(bchannel), csr);
 	}
+
+	/* enable channel and trigger the transfer */
+	csr = musb_readl(mbase, MUSB_DMA_CHN_PAUSE(bchannel));
+	if (csr & CHN_CLR)
+		musb_writel(mbase, MUSB_DMA_CHN_PAUSE(bchannel), 0);
+	csr = musb_readl(mbase, MUSB_DMA_CHN_CFG(bchannel));
+	csr |= CHN_EN;
+	musb_writel(mbase, MUSB_DMA_CHN_CFG(bchannel), csr);
+}
+
+/* One transfer: a single buffer, as the core asked for. */
+static void configure_channel(struct dma_channel *channel,
+				dma_addr_t dma_addr, u32 len)
+{
+	struct sprd_musb_dma_channel *musb_channel = channel->private_data;
+	struct musb *musb = musb_channel->controller->private_data;
+	struct sprd_musb_linklist_node *linklist;
+	u64 list_addr;
+	int start, n;
+
+	dev_dbg(musb->controller, "%cx len=%u on channel %d\n",
+		musb_channel->transmit ? 'T' : 'R', len, musb_channel->idx);
+
+	linklist = channel_linklist(musb_channel, &list_addr, &start);
+	n = add_nodes(linklist, 0, MAX_NODES_PER_CHANNEL - start, dma_addr, len);
+	linklist[n - 1].list_end = 1;
+	linklist[n - 1].ioc = 1;
+	musb_channel->nreqs = 0;
+	musb_channel->next_node = start + n;
+	start_channel(musb_channel, list_addr);
+}
+
+static bool request_chainable(struct musb_request *req)
+{
+	return req->map_state != UN_MAPPED &&
+	       req->request.dma != DMA_ADDR_INVALID &&
+	       req->request.length > req->request.actual;
+}
+
+/*
+ * Peripheral RX: chain every queued request of the endpoint into one list,
+ * so the engine runs from one buffer straight into the next. Between a
+ * list's end and the next CHN_EN the engine takes no DMA request, and at
+ * full OUT rate packets land in that gap on every transfer; with the next
+ * request already in the list there is no gap. The vendor driver works
+ * this way. Returns false when the head of the queue is not the request
+ * the core asked for, in which case the caller programs just that one.
+ */
+static bool configure_rx_chain(struct dma_channel *channel,
+			       struct musb_ep *musb_ep,
+			       dma_addr_t dma_addr, u32 len)
+{
+	struct sprd_musb_dma_channel *musb_channel = channel->private_data;
+	struct musb *musb = musb_channel->controller->private_data;
+	struct sprd_musb_linklist_node *linklist;
+	struct musb_request *req;
+	u64 list_addr;
+	int start, idx = 0, n;
+	unsigned int nreqs = 0;
+
+	req = next_request(musb_ep);
+	if (!req || !request_chainable(req) ||
+	    req->request.dma + req->request.actual != dma_addr ||
+	    req->request.length - req->request.actual != len)
+		return false;
+
+	linklist = channel_linklist(musb_channel, &list_addr, &start);
+	list_for_each_entry(req, &musb_ep->req_list, list) {
+		if (!request_chainable(req))
+			break;
+		n = add_nodes(linklist, idx, MAX_NODES_PER_CHANNEL - start,
+			      req->request.dma + req->request.actual,
+			      req->request.length - req->request.actual);
+		if (!n)
+			break;
+		idx += n;
+		nreqs++;
+	}
+	linklist[idx - 1].list_end = 1;
+	linklist[idx - 1].ioc = 1;
+	musb_channel->nreqs = nreqs;
+	musb_channel->next_node = start + idx;
+
+	dev_dbg(musb->controller, "Rx len=%u (+%u queued) on channel %d\n",
+		len, nreqs - 1, musb_channel->idx);
+	start_channel(musb_channel, list_addr);
+	return true;
 }
 
 static int dma_channel_program(struct dma_channel *channel,
@@ -189,15 +297,31 @@ static int dma_channel_program(struct dma_channel *channel,
 				dma_addr_t dma_addr, u32 len)
 {
 	struct sprd_musb_dma_channel *musb_channel = channel->private_data;
+	struct musb *musb = musb_channel->controller->private_data;
 
-	BUG_ON(channel->status == MUSB_DMA_STATUS_UNKNOWN ||
-		channel->status == MUSB_DMA_STATUS_BUSY);
+	/* Refuse rather than panic, as the vendor driver does. */
+	if (channel->status == MUSB_DMA_STATUS_UNKNOWN ||
+	    channel->status == MUSB_DMA_STATUS_BUSY) {
+		dev_warn_ratelimited(musb->controller,
+				     "channel %d programmed while %s\n",
+				     musb_channel->idx,
+				     channel->status == MUSB_DMA_STATUS_BUSY ?
+				     "busy" : "unallocated");
+		return false;
+	}
 
 	channel->actual_len = 0;
-	musb_channel->start_addr = (u32)dma_addr;
 	musb_channel->len = len;
 	channel->status = MUSB_DMA_STATUS_BUSY;
 
+	if (!musb_channel->transmit && !is_host_active(musb)) {
+		struct musb_hw_ep *hw_ep = &musb->endpoints[musb_channel->epnum];
+		struct musb_ep *musb_ep = hw_ep->is_shared_fifo ?
+					  &hw_ep->ep_in : &hw_ep->ep_out;
+
+		if (configure_rx_chain(channel, musb_ep, dma_addr, len))
+			return true;
+	}
 	configure_channel(channel, dma_addr, len);
 
 	return true;
@@ -269,34 +393,155 @@ static int dma_channel_abort(struct dma_channel *channel)
 	return 0;
 }
 
+/*
+ * A chained RX list ended: either every request in it filled up, or a short
+ * packet ended it part way through one of them. Give back what is done,
+ * then, if more requests are queued and a packet is already waiting, start
+ * the next list; otherwise leave DMAENAB off and let the next packet's
+ * endpoint interrupt arm it through musb_g_rx() (see rxstate()).
+ */
+static void sprd_rx_chain_complete(struct musb *musb,
+				   struct sprd_musb_dma_channel *musb_channel)
+{
+	struct dma_channel *channel = &musb_channel->channel;
+	struct musb_hw_ep *hw_ep = &musb->endpoints[musb_channel->epnum];
+	struct musb_ep *musb_ep = hw_ep->is_shared_fifo ? &hw_ep->ep_in :
+							  &hw_ep->ep_out;
+	void __iomem *mbase = musb->mregs;
+	void __iomem *epio = hw_ep->regs;
+	unsigned int nreqs = musb_channel->nreqs, i, last;
+	u32 remaining, addr, done = 0;
+	struct musb_request *req;
+	u16 csr;
+
+	remaining = musb_readl(mbase, MUSB_DMA_CHN_LEN(musb_channel->idx)) >> 16;
+	addr = musb_readl(mbase, MUSB_DMA_CHN_ADDR(musb_channel->idx));
+	musb_channel->nreqs = 0;
+	channel->status = MUSB_DMA_STATUS_FREE;
+	musb_ep_select(mbase, musb_channel->epnum);
+	/*
+	 * Nothing is armed now: drop DMAENAB first, so that a packet landing
+	 * from here on raises the endpoint interrupt instead of a DMA
+	 * request nobody takes. Any packet already there is caught below.
+	 */
+	csr = musb_readw(epio, MUSB_RXCSR);
+	csr &= ~(MUSB_RXCSR_AUTOCLEAR | MUSB_RXCSR_DMAENAB |
+		 MUSB_RXCSR_DMAMODE);
+	musb_writew(epio, MUSB_RXCSR, MUSB_RXCSR_P_WZC_BITS | csr);
+	dev_dbg(musb->controller, "rx done ch%d remaining %u addr %08x\n",
+		musb_channel->idx, remaining, addr);
+
+	/*
+	 * Which request did the list end in? With nothing remaining it ran
+	 * to the end. Otherwise a short packet stopped it in the node whose
+	 * end, less what remains, is where the engine's address points.
+	 */
+	last = nreqs - 1;
+	if (remaining) {
+		bool found = false;
+
+		i = 0;
+		list_for_each_entry(req, &musb_ep->req_list, list) {
+			u32 start = (u32)(req->request.dma + req->request.actual);
+			u32 len = req->request.length - req->request.actual;
+
+			if (i >= nreqs)
+				break;
+			if (remaining <= len && start + len - remaining == addr) {
+				last = i;
+				done = len - remaining;
+				found = true;
+				break;
+			}
+			i++;
+		}
+		if (!found) {
+			/* No match: assume the first request, as before. */
+			req = next_request(musb_ep);
+			last = 0;
+			done = req->request.length - req->request.actual;
+			if (remaining <= done)
+				done -= remaining;
+			dev_warn_ratelimited(musb->controller,
+				"rx chain: addr %08x matches no node (remaining %u), taking request 0\n",
+				addr, remaining);
+		}
+	}
+
+	musb_ep_select(mbase, musb_channel->epnum);
+	for (i = 0; i <= last; i++) {
+		struct usb_request *request;
+
+		req = next_request(musb_ep);
+		if (!req)
+			break;
+		request = &req->request;
+		if (i == last && remaining)
+			request->actual += done;
+		else
+			request->actual = request->length;
+		dev_dbg(musb->controller, "Rx actual_len=%u on channel %d\n",
+			request->actual, musb_channel->idx);
+		/* Drops and retakes the lock; the queue may grow meanwhile. */
+		musb_g_giveback(musb_ep, request, 0);
+		musb_ep_select(mbase, musb_channel->epnum);
+	}
+
+	req = musb_ep->desc ? next_request(musb_ep) : NULL;
+	/*
+	 * Only arm the next list with a packet already waiting (see
+	 * rxstate()); otherwise its arrival interrupts and musb_g_rx() arms.
+	 */
+	if (!req || !request_chainable(req))
+		return;
+	csr = musb_readw(epio, MUSB_RXCSR);
+	if (!(csr & MUSB_RXCSR_RXPKTRDY)) {
+		dev_dbg(musb->controller, "rx chain wait ch%d rxcsr %04x\n",
+			musb_channel->idx, csr);
+		return;
+	}
+	if (dma_channel_program(channel, musb_ep->packet_sz, 0,
+				req->request.dma + req->request.actual,
+				req->request.length - req->request.actual)) {
+		csr |= MUSB_RXCSR_AUTOCLEAR | MUSB_RXCSR_DMAMODE |
+		       MUSB_RXCSR_DMAENAB;
+		musb_writew(epio, MUSB_RXCSR, csr);
+	}
+}
+
 static void sprd_musb_dma_complete(struct musb *musb,
 				   struct sprd_musb_dma_channel *musb_channel)
 {
 	struct dma_channel *channel = &musb_channel->channel;
 	void __iomem *mbase = musb->mregs;
-	u32 dma_addr;
+	u32 remaining;
 
-	dma_addr = musb_readl(mbase, MUSB_DMA_CHN_ADDR(musb_channel->idx));
+	if (musb_channel->nreqs) {
+		sprd_rx_chain_complete(musb, musb_channel);
+		return;
+	}
 
 	/* Incomplete transfers are not possible when transmitting */
-	if (musb_channel->transmit)
+	if (musb_channel->transmit) {
 		channel->actual_len = musb_channel->len;
-	else
-		channel->actual_len = dma_addr - musb_channel->start_addr;
-
-	/*
-	 * When receiving data, dma_addr sometimes points to a location that
-	 * is not related to the current transfer. When this happens, we assume
-	 * that the transfer did not actually happen and reconfigure DMA to
-	 * receive again.
-	 */
-	if (channel->actual_len > musb_channel->len) {
-		dev_warn(musb->controller,
-			 "unexpected dma_addr=%08x, start=%08x\n",
-			 dma_addr, musb_channel->start_addr);
-		configure_channel(channel, musb_channel->start_addr,
-				  musb_channel->len);
-		return;
+	} else {
+		/*
+		 * A short packet ends the receive early. The vendor driver
+		 * takes what is left of the block from the high half of
+		 * CHN_LEN; the channel's address register, used here before,
+		 * sometimes reads unrelated values, and re-arming the channel
+		 * on those threw received data away.
+		 */
+		remaining = musb_readl(mbase,
+				MUSB_DMA_CHN_LEN(musb_channel->idx)) >> 16;
+		if (remaining > musb_channel->len) {
+			dev_warn_ratelimited(musb->controller,
+				"rx remaining %u > len %u on channel %d\n",
+				remaining, musb_channel->len,
+				musb_channel->idx);
+			remaining = 0;
+		}
+		channel->actual_len = musb_channel->len - remaining;
 	}
 
 	channel->status = MUSB_DMA_STATUS_FREE;
