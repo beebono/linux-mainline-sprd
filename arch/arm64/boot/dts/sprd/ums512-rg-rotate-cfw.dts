@@ -64,6 +64,19 @@
 	status = "disabled";
 };
 
+/* No touch input on the CFW (CONFIG_INPUT_TOUCHSCREEN is off): keep the
+ * GT911 unbound and its supply off from probe, instead of on until the
+ * unused-regulator cleanup ~30s in. */
+&touch_vdd {
+	/delete-property/ regulator-boot-on;
+};
+
+&i2c3 {
+	touchscreen@14 {
+		status = "disabled";
+	};
+};
+
 /* The panel is brought up cold by the kernel, with no splash to inherit. */
 &dpu {
 	/delete-property/ memory-region;
