@@ -21,8 +21,44 @@
 	};
 
 	/* PSCI comes from the SPL-loaded EL3 monitor (ext/boot/spl/monitor),
-	 * which has no CPU_SUSPEND: no idle states. */
-	/delete-node/ idle-states;
+	 * which does CPU_SUSPEND to a core power-down. ums512.dtsi's CORE_PD
+	 * carries stock's big_core_pd numbers; the A55s get stock's
+	 * lit_core_pd, without which they never stayed idle long enough
+	 * (10 ms) for the governor to pick it. */
+	idle-states {
+		LIT_CORE_PD: lit-core-pd {
+			compatible = "arm,idle-state";
+			entry-latency-us = <1000>;
+			exit-latency-us = <500>;
+			min-residency-us = <2500>;
+			local-timer-stop;
+			arm,psci-suspend-param = <0x00010000>;
+		};
+	};
+};
+
+&CPU0 {
+	cpu-idle-states = <&LIT_CORE_PD>;
+};
+
+&CPU1 {
+	cpu-idle-states = <&LIT_CORE_PD>;
+};
+
+&CPU2 {
+	cpu-idle-states = <&LIT_CORE_PD>;
+};
+
+&CPU3 {
+	cpu-idle-states = <&LIT_CORE_PD>;
+};
+
+&CPU4 {
+	cpu-idle-states = <&LIT_CORE_PD>;
+};
+
+&CPU5 {
+	cpu-idle-states = <&LIT_CORE_PD>;
 };
 
 &{/reserved-memory} {
@@ -80,34 +116,3 @@
 	/delete-property/ memory-region;
 };
 
-&CPU0 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU1 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU2 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU3 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU4 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU5 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU6 {
-	/delete-property/ cpu-idle-states;
-};
-
-&CPU7 {
-	/delete-property/ cpu-idle-states;
-};
