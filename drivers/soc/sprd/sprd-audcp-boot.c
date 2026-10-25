@@ -3,6 +3,7 @@
  * Spreadtrum/Unisoc audio-DSP (AGDSP / AUDCP) boot driver.
  */
 
+#include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
@@ -114,6 +115,45 @@ static void audcp_boot_start(struct audcp_boot *b)
 	audcp_set(b, CTRL_BOOTADDRESS_SEL, true);
 	audcp_set(b, CTRL_CORE_RESET, false);
 	audcp_set(b, CTRL_SYS_RESET, false);
+}
+
+/*
+ * audcp_boot_start() only flips the PMU bits; the subsystem then powers
+ * up on its own time. Touching anything in AGCP address space before it
+ * has (the clock gates, from a consumer's probe on another CPU) raises an
+ * SError. Wait for the PMU to report the system and core out of shutdown
+ * and not in sleep: the state fields read 0 once a domain is fully up.
+ */
+static int audcp_boot_wait_up(struct audcp_boot *b)
+{
+	static const enum audcp_ctrl stat[] = {
+		CTRL_SYS_STATUS, CTRL_CORE_STATUS, CTRL_SLEEP_STATUS,
+	};
+	unsigned long timeout = jiffies + msecs_to_jiffies(200);
+	u32 v[ARRAY_SIZE(stat)] = { 0 };
+	int i;
+
+	for (;;) {
+		bool up = true;
+
+		for (i = 0; i < ARRAY_SIZE(stat); i++) {
+			if (!b->map[stat[i]])
+				continue;
+			if (regmap_read(b->map[stat[i]], b->reg[stat[i]], &v[i]))
+				continue;
+			if (v[i] & b->mask[stat[i]])
+				up = false;
+		}
+		if (up)
+			return 0;
+		if (time_after(jiffies, timeout)) {
+			dev_warn(b->dev,
+				 "AUDCP not reporting up (sys %#x core %#x sleep %#x), going on anyway\n",
+				 v[0], v[1], v[2]);
+			return -ETIMEDOUT;
+		}
+		usleep_range(100, 200);
+	}
 }
 
 static int audcp_boot_load_firmware(struct audcp_boot *b)
@@ -234,6 +274,9 @@ static int audcp_boot_probe(struct platform_device *pdev)
 	 * sprd_audcp_boot driver.
 	 */
 	audcp_boot_start(b);
+	/* Consumers probe the moment the domain appears below: be up first. */
+	if (audcp_boot_wait_up(b))
+		msleep(20);
 
 	/*
 	 * Everything in AGCP address space (audcpahb/audcpapb clock gates,
