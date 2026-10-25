@@ -12,13 +12,12 @@
 / {
 	model = "Anbernic RG Rotate (CFW)";
 
-	/* No bootloader to supply a command line. Console on the panel only;
-	 * dmesg is read over the USB serial shell. Go back to "quiet
-	 * loglevel=0" once RetroArch owns the panel. panic=5: once sprd_wdt
+	/* No bootloader to supply a command line.
+	 * dmesg is read over the USB serial. panic=5: once sprd_wdt
 	 * owns the watchdog a panic would halt forever; reboot through the
 	 * sc27xx restart handler instead. */
 	chosen {
-		bootargs = "panic=5 console=tty0 loglevel=7 fbcon=font:TER16x32";
+		bootargs = "panic=5 loglevel=0 quiet console=ttyGS0";
 	};
 
 	/* PSCI comes from the SPL-loaded EL3 monitor (ext/boot/spl/monitor),
