@@ -15,6 +15,8 @@
 #include <linux/pm_domain.h>
 #include <linux/regmap.h>
 
+#include "../../../sound/soc/sprd/vendor/agdsp_access.h"
+
 #define AGDSP_FIRMWARE_NAME		"agdsp.bin"
 #define AGDSP_BOOT_OFFSET		0x80
 #define AGDSP_BOOT_PROTECT_MAGIC	0x9620
@@ -118,38 +120,43 @@ static void audcp_boot_start(struct audcp_boot *b)
 }
 
 /*
- * audcp_boot_start() only flips the PMU bits; the subsystem then powers
- * up on its own time. Touching anything in AGCP address space before it
- * has (the clock gates, from a consumer's probe on another CPU) raises an
- * SError. Wait for the PMU to report the system and core out of shutdown
- * and not in sleep: the state fields read 0 once a domain is fully up.
+ * audcp_boot_start() only releases the subsystem: the PMU keeps it shut
+ * down (sys/core state 7, DSP in deep sleep) until a wake event, and the
+ * AGCP bus raises an SError when touched before then. The vendor's wake
+ * is a mailbox message to the DSP (agdsp_access_enable, with the sound
+ * card's channel), after which the PMU reports sys and core in state 0
+ * and the DSP in WAKEUP_LOCK (6). Wait for exactly that, like the
+ * vendor's agdsp_can_access() does.
  */
+#define AUDCP_PD_WAKEUP		0
+#define AUDCP_SLP_WAKEUP_LOCK	6
+
+static u32 audcp_field(struct audcp_boot *b, enum audcp_ctrl c)
+{
+	u32 v = 0;
+
+	if (!b->map[c] || regmap_read(b->map[c], b->reg[c], &v))
+		return ~0u;
+	return (v & b->mask[c]) >> (ffs(b->mask[c]) - 1);
+}
+
 static int audcp_boot_wait_up(struct audcp_boot *b)
 {
-	static const enum audcp_ctrl stat[] = {
-		CTRL_SYS_STATUS, CTRL_CORE_STATUS, CTRL_SLEEP_STATUS,
-	};
-	unsigned long timeout = jiffies + msecs_to_jiffies(200);
-	u32 v[ARRAY_SIZE(stat)] = { 0 };
-	int i;
+	unsigned long timeout = jiffies + msecs_to_jiffies(500);
+	u32 sys, core, slp;
 
 	for (;;) {
-		bool up = true;
-
-		for (i = 0; i < ARRAY_SIZE(stat); i++) {
-			if (!b->map[stat[i]])
-				continue;
-			if (regmap_read(b->map[stat[i]], b->reg[stat[i]], &v[i]))
-				continue;
-			if (v[i] & b->mask[stat[i]])
-				up = false;
-		}
-		if (up)
+		sys  = audcp_field(b, CTRL_SYS_STATUS);
+		core = audcp_field(b, CTRL_CORE_STATUS);
+		slp  = audcp_field(b, CTRL_SLEEP_STATUS);
+		if ((!b->map[CTRL_SYS_STATUS] || sys == AUDCP_PD_WAKEUP)
+		    && (!b->map[CTRL_CORE_STATUS] || core == AUDCP_PD_WAKEUP)
+		    && (!b->map[CTRL_SLEEP_STATUS] || slp == AUDCP_SLP_WAKEUP_LOCK))
 			return 0;
 		if (time_after(jiffies, timeout)) {
 			dev_warn(b->dev,
-				 "AUDCP not reporting up (sys %#x core %#x sleep %#x), going on anyway\n",
-				 v[0], v[1], v[2]);
+				 "AUDCP not up (sys %u core %u sleep %u), going on anyway\n",
+				 sys, core, slp);
 			return -ETIMEDOUT;
 		}
 		usleep_range(100, 200);
@@ -274,7 +281,16 @@ static int audcp_boot_probe(struct platform_device *pdev)
 	 * sprd_audcp_boot driver.
 	 */
 	audcp_boot_start(b);
-	/* Consumers probe the moment the domain appears below: be up first. */
+	/*
+	 * Wake it the vendor way and keep that vote for good: mainline
+	 * consumers of the AGCP bus probe the moment the domain appears
+	 * below and cannot vote for themselves.
+	 */
+	ret = agdsp_access_enable();
+	if (ret == -EPROBE_DEFER)
+		return dev_err_probe(dev, ret, "agdsp access not ready yet\n");
+	if (ret)
+		dev_warn(dev, "agdsp access enable failed (%d)\n", ret);
 	if (audcp_boot_wait_up(b))
 		msleep(20);
 
