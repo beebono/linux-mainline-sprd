@@ -17,7 +17,7 @@
 	 * owns the watchdog a panic would halt forever; reboot through the
 	 * sc27xx restart handler instead. */
 	chosen {
-		bootargs = "panic=5 loglevel=0 quiet console=ttyGS0";
+		bootargs = "panic=5 loglevel=0 quiet console=ttyGS0 irqchip.gicv3_pseudo_nmi=1";
 	};
 
 	/* PSCI comes from the SPL-loaded EL3 monitor (ext/boot/spl/monitor),
