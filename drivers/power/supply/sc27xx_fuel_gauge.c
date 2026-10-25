@@ -15,8 +15,14 @@
 #include <linux/slab.h>
 
 /* PMIC global control registers definition */
-#define SC2730_MODULE_EN0		0xc08
-#define SC2730_CLK_EN0			0xc18
+/*
+ * The SC2730's global registers sit at 0x1800 like the SC2731's (vendor
+ * __regs_ana_sc2730_glb.h; sc27xx-efuse uses 0x1808 too). 0xc08/0xc18 are
+ * inside the FGU block itself, so the gauge was never enabled or clocked
+ * and every register read back 0.
+ */
+#define SC2730_MODULE_EN0		0x1808
+#define SC2730_CLK_EN0			0x1810
 #define SC2731_MODULE_EN0		0x1808
 #define SC2731_CLK_EN0			0x1810
 #define SC27XX_FGU_EN			BIT(7)
