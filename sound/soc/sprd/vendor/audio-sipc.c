@@ -42,8 +42,8 @@
 #include "sprd-string.h"
 #include "agdsp_access.h"
 
-#define sp_asoc_pr_dbg pr_info
-#define sp_asoc_pr_info pr_info
+#define sp_asoc_pr_dbg pr_debug
+#define sp_asoc_pr_info pr_debug
 
 #define AUDIO_SMSG_RINGHDR_EXT_SIZE	(16)
 #define AUDIO_SMSG_RINGHDR_EXT_TXRDPTR	(0)
@@ -219,7 +219,7 @@ static int audio_sipc_create(int target_id)
 	smsg_rxsize = smsg_txsize;
 	smsg_txaddr = smsg_base_v;
 	smsg_rxaddr = smsg_base_v + smsg_txsize;
-	pr_info("%s: ioremap txbuf: vbase=%#zx, pbase=0x%x, size=0x%x\n",
+	pr_debug("%s: ioremap txbuf: vbase=%#zx, pbase=0x%x, size=0x%x\n",
 		__func__, smsg_txaddr, smsg_base_p, smsg_txsize);
 
 	s_sipc_inst.dst = AUD_IPC_AGDSP;
@@ -457,7 +457,7 @@ static int aud_ipc_init(int target_id)
 	/* create sipc for audio */
 	struct audio_ipc *aud_ipc = aud_ipc_get();
 
-	pr_info("%s", __func__);
+	pr_debug("%s", __func__);
 	mutex_init(&aud_ipc->lock_block_param);
 	mutex_init(&aud_ipc->lock);
 	ret = audio_sipc_create(target_id);
@@ -584,7 +584,7 @@ int aud_send_cmd_no_wait(u16 channel, u32 cmd,
 {
 	int ret;
 
-	pr_info("%s no wait\n", __func__);
+	pr_debug("%s no wait\n", __func__);
 	ret = aud_send_msg(channel, cmd,
 			   value0, value1, value2, value3);
 	if (ret < 0) {
@@ -632,7 +632,7 @@ int aud_send_cmd_no_param(u16 channel, u32 cmd,
 		       __func__, channel, cmd, ret);
 		goto err;
 	}
-	pr_info(
+	pr_debug(
 		"%s out,channel = %d cmd =%d ret-value:%d,repeat_count=%d\n",
 		__func__, channel, cmd, value.parameter3, repeat_count);
 
@@ -691,7 +691,7 @@ int aud_send_cmd(u16 channel, int id, int stream,
 		       __func__, cmd, ret);
 		goto err;
 	}
-	pr_info("%s %d wait dsp\n", __func__, __LINE__);
+	pr_debug("%s %d wait dsp\n", __func__, __LINE__);
 	do {
 		ret = aud_recv_cmd(channel, cmd, &value, CMD_SEND_TIMEOUT);
 		repeat_count++;
@@ -739,7 +739,7 @@ int aud_send_cmd_no_wait_param(u16 channel, int id, int stream,
 		       __func__, cmd, ret);
 		goto err;
 	}
-	pr_info("%s %d wait dsp\n", __func__, __LINE__);
+	pr_debug("%s %d wait dsp\n", __func__, __LINE__);
 err:
 	aud_ipc_unlock();
 
@@ -843,9 +843,9 @@ int aud_send_block_param(u16 channel, int id, int stream, u32 cmd,
 	sharemem_info.size = n;
 
 	/* send audio cmd */
-	pr_info("cmd =%d sharemem_info.id = %d, sharemem_info.type=%d,",
+	pr_debug("cmd =%d sharemem_info.id = %d, sharemem_info.type=%d,",
 		cmd, sharemem_info.id, sharemem_info.type);
-	pr_info(" sharemem_info.phy_iram_addr=%#x, sharemem_info.size=%#x\n",
+	pr_debug(" sharemem_info.phy_iram_addr=%#x, sharemem_info.size=%#x\n",
 		sharemem_info.phy_iram_addr,
 		sharemem_info.size);
 	ret = aud_send_cmd(channel, id, stream, cmd, &sharemem_info,
@@ -914,7 +914,7 @@ static int audio_sipc_probe(struct platform_device *pdev)
 	int target_id = 0;
 	struct audio_ipc *aud_ipc = aud_ipc_get();
 
-	pr_info("%s in\n", __func__);
+	pr_debug("%s in\n", __func__);
 
 	ret = aud_ipc_init(target_id);
 	if (ret) {
@@ -940,7 +940,7 @@ static int audio_sipc_probe(struct platform_device *pdev)
 		ret = PTR_ERR(aud_ipc->chan);
 		return ret;
 	}
-	pr_info("mailbox request success\n");
+	pr_debug("mailbox request success\n");
 
 	aud_smsg_set_mboxchan(aud_ipc->chan);
 	agdsp_set_mboxchan(aud_ipc->chan);

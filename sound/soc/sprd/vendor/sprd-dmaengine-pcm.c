@@ -58,7 +58,7 @@
 #define NORMAL_CAPTURE_BUFFER_BYTES_MAX		(64 * 1024)
 
 #undef sp_asoc_pr_info
-#define sp_asoc_pr_info pr_info
+#define sp_asoc_pr_info pr_debug
 
 struct audio_pm_dma *pm_dma;
 
@@ -340,7 +340,7 @@ static int sprd_pcm_open(struct snd_pcm_substream *substream)
 
 	pm_dma = get_pm_dma();
 
-	pr_info("%s %s Open %s\n", __func__, sprd_dai_pcm_name(snd_soc_rtd_to_cpu(srtd, 0)),
+	pr_debug("%s %s Open %s\n", __func__, sprd_dai_pcm_name(snd_soc_rtd_to_cpu(srtd, 0)),
 			PCM_DIR_NAME(substream->stream));
 
 	if (sprd_is_i2s_or_tdm(snd_soc_rtd_to_cpu(srtd, 0))) {
@@ -503,16 +503,16 @@ static int sprd_pcm_open(struct snd_pcm_substream *substream)
 		goto err;
 	}
 	memset_io(rtd->dma_cfg_virt[0], 0, size_inout);
-	pr_info("rtd->dma_cfg_virt[0] =%#lx, rtd->dma_cfg_phy[0] =%#lx,",
+	pr_debug("rtd->dma_cfg_virt[0] =%#lx, rtd->dma_cfg_phy[0] =%#lx,",
 		(unsigned long)rtd->dma_cfg_virt[0],
 		(unsigned long)rtd->dma_cfg_phy[0]);
-	pr_info("rtd->dma_cfg_virt[1]=%#lx,rtd->dma_cfg_phy[1]=%#lx,",
+	pr_debug("rtd->dma_cfg_virt[1]=%#lx,rtd->dma_cfg_phy[1]=%#lx,",
 		(unsigned long)rtd->dma_cfg_virt[1],
 		(unsigned long)rtd->dma_cfg_phy[1]);
 
-	pr_info("runtime->hw.periods_max*(sizeof(struct sprd_dma_cfg)=%zd,",
+	pr_debug("runtime->hw.periods_max*(sizeof(struct sprd_dma_cfg)=%zd,",
 		runtime->hw.periods_max*(sizeof(struct sprd_dma_cfg)));
-	pr_info("sizeof(struct sprd_dma_cfg) = %zd, size_inout=%u\n",
+	pr_debug("sizeof(struct sprd_dma_cfg) = %zd, size_inout=%u\n",
 		sizeof(struct sprd_dma_cfg), size_inout);
 	/*pmc dma data*/
 	ret = sprd_pcm_preallocate_dma_ddr32_buffer(pcm,
@@ -628,7 +628,7 @@ static int sprd_pcm_close(struct snd_pcm_substream *substream)
 	struct audio_pm_dma *pm_dma;
 
 	pm_dma = get_pm_dma();
-	pr_info("%s %s Close %s\n", __func__, sprd_dai_pcm_name(snd_soc_rtd_to_cpu(srtd, 0)),
+	pr_debug("%s %s Close %s\n", __func__, sprd_dai_pcm_name(snd_soc_rtd_to_cpu(srtd, 0)),
 			PCM_DIR_NAME(substream->stream));
 	if (!rtd)
 		return -EINVAL;
@@ -829,7 +829,7 @@ static int sprd_pcm_dma_step_config(struct sprd_pcm_dma_params *dma_data,
 		}
 		desc->src_step = playback ? step : 0;
 		desc->des_step = playback ? 0 : step;
-		pr_info("desc->src_step  =%u, des_step=%u, datawidth =%u\n",
+		pr_debug("desc->src_step  =%u, des_step=%u, datawidth =%u\n",
 		       desc->src_step,
 		       desc->des_step,
 		       desc->datawidth);
@@ -889,7 +889,7 @@ static int sprd_pcm_request_dma_channel(
 		rtd->dma_chn[i] = dma_chn_request;
 		rtd->transform_type = sprd_pcm_get_transf_type(substream,
 			dma_chn_request);
-		pr_info("Chan%d DMA ID=%d\n",
+		pr_debug("Chan%d DMA ID=%d\n",
 			       rtd->dma_chn[i]->chan_id,
 			       rtd->params->channels[i]);
 		normal_dma_protect_spin_unlock(substream);
@@ -1061,7 +1061,7 @@ static int sprd_pcm_config_dma(struct snd_pcm_substream *substream,
 				(unsigned long)audio_addr_ap2dsp(DDR32,
 				(rtd->dma_cfg_phy[i]), 0);
 
-		pr_info("src_dw=%d, dst_dw=%d frag=%lx, burst:%d, slave_id=%d, step=%d, ll_cfg_virt_addr=%p, ll_cfg_phy_addr=%ld ,dst_addr:%ld, src_addr:%ld,chan=%d\n",
+		pr_debug("src_dw=%d, dst_dw=%d frag=%lx, burst:%d, slave_id=%d, step=%d, ll_cfg_virt_addr=%p, ll_cfg_phy_addr=%ld ,dst_addr:%ld, src_addr:%ld,chan=%d\n",
 			(int)cfg->config.src_addr_width,
 			(int)cfg->config.dst_addr_width,
 			cfg->dma_config_flag,
@@ -1104,7 +1104,7 @@ static int sprd_pcm_config_dma(struct snd_pcm_substream *substream,
 				dma_buff_phys[i] += period;
 			else
 				dma_buff_phys[i] += (period/ch_cnt);
-			pr_info("sg_dma_len=%zu, periods=%zu, sg_dma_address=%p, flag:%lx, chan=%d node=%d\n",
+			pr_debug("sg_dma_len=%zu, periods=%zu, sg_dma_address=%p, flag:%lx, chan=%d node=%d\n",
 				period, periods, (void *)sg_dma_address(sg),
 				(j == 0) ? cfg->dma_config_flag : 0, i, j);
 		}
@@ -1112,7 +1112,7 @@ static int sprd_pcm_config_dma(struct snd_pcm_substream *substream,
 			period = totsize;
 		j++;
 	} while (totsize -= period);
-	pr_info("Node Size:%d\n", j);
+	pr_debug("Node Size:%d\n", j);
 
 	return 0;
 }
@@ -1179,12 +1179,12 @@ static int sprd_pcm_arm_dma(struct snd_pcm_substream *substream,
 		dma_buff_phys[i] = runtime->dma_addr + i * rtd->dma_addr_offset;
 		dma_config_ptr[i]->sg = (struct scatterlist *)((u8 *) &
 			(dma_config_ptr[i]->sg) + sizeof(void *));
-		pr_info("dma_buff_phys[%d] %u\n",
+		pr_debug("dma_buff_phys[%d] %u\n",
 			i, (u32)dma_buff_phys[i]);
 	}
 	normal_dma_protect_spin_unlock(substream);
 	normal_dma_protect_mutex_unlock(substream);
-	pr_info("%s, block %u\n", __func__, (u32)period / ch_cnt);
+	pr_debug("%s, block %u\n", __func__, (u32)period / ch_cnt);
 
 	ret = sprd_pcm_config_dma(substream, params, dma_config_ptr,
 				  dma_buff_phys);
@@ -1230,7 +1230,7 @@ static int sprd_pcm_arm_dma(struct snd_pcm_substream *substream,
 		rtd->dma_tx_des[i] = tmp_tx_des;
 		normal_dma_protect_spin_unlock(substream);
 		if (!(params->flags & SNDRV_PCM_HW_PARAMS_NO_PERIOD_WAKEUP)) {
-			pr_info("%s, Register Callback func for DMA chan ID %d\n",
+			pr_debug("%s, Register Callback func for DMA chan ID %d\n",
 				__func__, rtd->dma_chn[i]->chan_id);
 			rtd->dma_tx_des[i]->callback = sprd_pcm_dma_buf_done;
 			rtd->dma_tx_des[i]->callback_param =
@@ -1447,7 +1447,7 @@ static int sprd_pcm_hw_params(struct snd_pcm_substream *substream,
 	goto ok_go_out;
 
 no_dma:
-	pr_info("no dma\n");
+	pr_debug("no dma\n");
 	rtd->params = NULL;
 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
 	runtime->dma_bytes = totsize;
@@ -1488,7 +1488,7 @@ static int sprd_pcm_hw_free(struct snd_pcm_substream *substream)
 		for (i = 0; i < rtd->hw_chan; i++) {
 			if (rtd->dma_chn[i]) {
 				temp_dma_chan = rtd->dma_chn[i];
-				pr_info("%s release id=%d\n",
+				pr_debug("%s release id=%d\n",
 					__func__, rtd->dma_chn[i]->chan_id);
 				normal_dma_protect_spin_lock(substream);
 				rtd->dma_chn[i] = NULL;
@@ -1564,7 +1564,7 @@ static int sprd_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 		normal_dma_protect_spin_lock(substream);
 		if (rtd->dma_tx_des[0] == NULL) {
 			normal_dma_protect_spin_unlock(substream);
-			pr_info("%s dma_tx_des[0] is null ret=%#x, %d\n",
+			pr_debug("%s dma_tx_des[0] is null ret=%#x, %d\n",
 				__func__, -ENODATA, -ENODATA);
 			return -ENODATA;
 		}
@@ -1579,7 +1579,7 @@ static int sprd_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 				dma_async_issue_pending(rtd->dma_chn[i]);
 		}
 
-		pr_info("pcm Start\n");
+		pr_debug("pcm Start\n");
 		normal_dma_protect_spin_unlock(substream);
 		break;
 	case SNDRV_PCM_TRIGGER_RESUME:
@@ -1597,7 +1597,7 @@ static int sprd_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 		normal_dma_protect_spin_lock(substream);
 		if (rtd->dma_chn[0] == NULL) {
 			normal_dma_protect_spin_unlock(substream);
-			pr_info("%s dma_chn[0] is null ret=%#x, %d\n",
+			pr_debug("%s dma_chn[0] is null ret=%#x, %d\n",
 				__func__, -ENODATA, -ENODATA);
 			return -ENODATA;
 		}
@@ -1605,17 +1605,17 @@ static int sprd_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 			if (rtd->dma_chn[i])
 				dmaengine_resume(rtd->dma_chn[i]);
 		}
-		pr_info("pcm Resume\n");
+		pr_debug("pcm Resume\n");
 		normal_dma_protect_spin_unlock(substream);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		normal_dma_protect_spin_lock(substream);
-		pr_info("pcm Stop\n");
+		pr_debug("pcm Stop\n");
 		if (rtd->dma_chn[0] == NULL) {
 			normal_dma_protect_spin_unlock(substream);
-			pr_info("%s dma_chn[0] is null ret=%#x, %d\n",
+			pr_debug("%s dma_chn[0] is null ret=%#x, %d\n",
 				__func__, -ENODATA, -ENODATA);
 			return -ENODATA;
 		}
@@ -1624,7 +1624,7 @@ static int sprd_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 				dmaengine_pause(rtd->dma_chn[i]);
 		}
 		rtd->cb_called = 0;
-		pr_info("pcm E\n");
+		pr_debug("pcm E\n");
 		normal_dma_protect_spin_unlock(substream);
 		break;
 	default:
@@ -1655,7 +1655,7 @@ static snd_pcm_uframes_t sprd_pcm_pointer(struct snd_pcm_substream *substream)
 		now_pointer = sprd_pcm_dma_get_addr(rtd->dma_chn[0],
 					rtd->cookie[0], substream);
 		if (debug_pointer_log)
-			pr_info("now_pointer 1:%zu,dsp:%zx\n",
+			pr_debug("now_pointer 1:%zu,dsp:%zx\n",
 				(size_t)now_pointer,
 				(size_t)audio_addr_ap2dsp(tranf,
 				now_pointer, 1));
@@ -1664,14 +1664,14 @@ static snd_pcm_uframes_t sprd_pcm_pointer(struct snd_pcm_substream *substream)
 			- runtime->dma_addr;
 		bytes_of_pointer = now_pointer;
 		if (debug_pointer_log)
-			pr_info("now_pointer 2:%zx,runtime->dma_addr:%zx\n",
+			pr_debug("now_pointer 2:%zx,runtime->dma_addr:%zx\n",
 				(size_t)now_pointer, (size_t)runtime->dma_addr);
 	}
 	if (rtd->dma_chn[1]) {
 		now_pointer = sprd_pcm_dma_get_addr(rtd->dma_chn[1],
 					rtd->cookie[1], substream);
 		if (debug_pointer_log)
-			pr_info("now_pointer 21:%zu,dsp:%zx\n",
+			pr_debug("now_pointer 21:%zu,dsp:%zx\n",
 				(size_t)now_pointer,
 				(size_t)audio_addr_ap2dsp(tranf,
 				now_pointer, 1));
@@ -1681,7 +1681,7 @@ static snd_pcm_uframes_t sprd_pcm_pointer(struct snd_pcm_substream *substream)
 			runtime->dma_addr -
 			rtd->dma_addr_offset;
 		if (debug_pointer_log)
-			pr_info("now_pointer 22:%zx,runtime->dma_addr:%zx\n",
+			pr_debug("now_pointer 22:%zx,runtime->dma_addr:%zx\n",
 				(size_t)now_pointer, (size_t)runtime->dma_addr);
 		if (bytes_of_pointer == -1) {
 			bytes_of_pointer = now_pointer;
@@ -1708,17 +1708,17 @@ static snd_pcm_uframes_t sprd_pcm_pointer(struct snd_pcm_substream *substream)
 					bytes_of_pointer, now_pointer) << shift;
 		}
 		if (debug_pointer_log)
-			pr_info("now_pointer 31:%zx\n", (size_t)now_pointer);
+			pr_debug("now_pointer 31:%zx\n", (size_t)now_pointer);
 	}
 	normal_dma_protect_spin_unlock(substream);
 	x = bytes_to_frames(runtime, bytes_of_pointer);
 	if (debug_pointer_log)
-		pr_info("x:%zx\n", (size_t)x);
+		pr_debug("x:%zx\n", (size_t)x);
 
 	if (x == runtime->buffer_size)
 		x = 0;
 	if (debug_pointer_log)
-		pr_info("x out:%zx\n", (size_t)x);
+		pr_debug("x out:%zx\n", (size_t)x);
 	return x;
 }
 
@@ -1806,7 +1806,7 @@ static int sprd_pcm_preallocate_dma_ddr32_buffer(struct snd_pcm *pcm,
 	else
 		if (!is_normal_cap_use_iram() && test_ddr_buffer_size)
 			size = test_ddr_buffer_size;
-	pr_info("%s alloc size = %#zx for data\n",
+	pr_debug("%s alloc size = %#zx for data\n",
 		__func__, size);
 	buf->private_data = NULL;
 	if (snd_soc_rtd_to_cpu(srtd, 0)->id == FE_DAI_ID_NORMAL_AP01 &&
@@ -1840,7 +1840,7 @@ static int sprd_pcm_preallocate_dma_ddr32_buffer(struct snd_pcm *pcm,
 		return -ENOMEM;
 	}
 
-	pr_info("%s, sprd_pcm_preallocate_dma_buffer buf->area(virt)=%#lx, buf->addr(phy)=%#x, size=%zu\n",
+	pr_debug("%s, sprd_pcm_preallocate_dma_buffer buf->area(virt)=%#lx, buf->addr(phy)=%#x, size=%zu\n",
 			__func__, (unsigned long)buf->area,
 			(unsigned int)buf->addr, size);
 
@@ -1891,21 +1891,21 @@ static void sprd_pcm_platform_proc_write(struct snd_info_entry *entry,
 			continue;
 		if (strcmp(name, "t_ddr_size") == 0) {
 			test_ddr_buffer_size = val;
-			pr_info("test_ddr_buffer_size =%#x\n",
+			pr_debug("test_ddr_buffer_size =%#x\n",
 				test_ddr_buffer_size);
 		}
 		if (strcmp(name, "t_use_iram") == 0) {
 			test_normal_cap_use_iram = val;
-			pr_info("test_normal_cap_use_iram =%#x\n",
+			pr_debug("test_normal_cap_use_iram =%#x\n",
 				test_normal_cap_use_iram);
 		}
 		if (strcmp(name, "t_force_stop") == 0) {
 			test_force_stop = val;
-			pr_info("test_force_stop =%#x\n", test_force_stop);
+			pr_debug("test_force_stop =%#x\n", test_force_stop);
 		}
 		if (strcmp(name, "debug_pointer_log") == 0) {
 			debug_pointer_log = val;
-			pr_info("debug_pointer_log=%#x\n", debug_pointer_log);
+			pr_debug("debug_pointer_log=%#x\n", debug_pointer_log);
 		}
 	}
 }
@@ -1995,7 +1995,7 @@ static void pm_normal_dma_chan_release(struct sprd_runtime_data *rtd)
 	mutex_lock(&pm_dma->pm_mtx_dma_prot);
 	for (i = 0; i < rtd->hw_chan; i++) {
 		if (rtd->dma_chn[i]) {
-			pr_info("%s, release chan_id %d\n",
+			pr_debug("%s, release chan_id %d\n",
 				__func__, rtd->dma_chn[i]->chan_id);
 			temp_dma_chan = rtd->dma_chn[i];
 			spin_lock(&pm_dma->pm_splk_dma_prot);
@@ -2005,7 +2005,7 @@ static void pm_normal_dma_chan_release(struct sprd_runtime_data *rtd)
 			spin_unlock(&pm_dma->pm_splk_dma_prot);
 			dma_release_channel(temp_dma_chan);
 		} else
-			pr_info("%s i=%d has released\n", __func__, i);
+			pr_debug("%s i=%d has released\n", __func__, i);
 	}
 	mutex_unlock(&pm_dma->pm_mtx_dma_prot);
 }
@@ -2020,7 +2020,7 @@ static int sprd_pcm_pm_notifier(struct notifier_block *notifier,
 
 	switch (pm_event) {
 	case PM_SUSPEND_PREPARE:
-		pr_info("%s, PM_SUSPEND_PREPARE.\n", __func__);
+		pr_debug("%s, PM_SUSPEND_PREPARE.\n", __func__);
 		mutex_lock(&pm_dma->pm_mtx_cnt);
 		if (pm_dma->no_pm_cnt == 0) {
 			pm_normal_dma_chan_release(pm_dma->normal_rtd);
@@ -2033,7 +2033,7 @@ static int sprd_pcm_pm_notifier(struct notifier_block *notifier,
 		mutex_unlock(&pm_dma->pm_mtx_cnt);
 		break;
 	case PM_POST_SUSPEND:
-		pr_info("%s, PM_POST_SUSPEND.\n", __func__);
+		pr_debug("%s, PM_POST_SUSPEND.\n", __func__);
 		/*
 		 * The vendor code left this to the Android HAL: it would see
 		 * an xrun, do a 'close -> re-open' and the playback would be

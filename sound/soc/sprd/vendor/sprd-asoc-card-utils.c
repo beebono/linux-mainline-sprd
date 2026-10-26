@@ -147,8 +147,12 @@ asoc_sprd_card_sub_parse_of(struct device_node *np,
 	ret = of_parse_phandle_with_args(np, "sound-dai",
 					 "#sound-dai-cells", 0, &args);
 	if (ret) {
-		pr_err("ERR: %s parse phandle '%s' failed!(%d)\n",
-		       __func__, np->name, ret);
+		/* -ENOENT: no codec on this link, the caller uses a dummy */
+		if (ret == -ENOENT)
+			pr_debug("%s: no phandle for '%s'\n", __func__, np->name);
+		else
+			pr_err("ERR: %s parse phandle '%s' failed!(%d)\n",
+			       __func__, np->name, ret);
 		return ret;
 	}
 
@@ -533,7 +537,7 @@ static int asoc_sprd_card_dai_link_of(struct device_node *node,
 					  dai_link->codecs, NULL);
 	if (ret < 0) {
 		if (-ENOENT == ret) {
-			pr_info("%s: parse for codec failed. Go to use a dummy codec.\n",
+			pr_debug("%s: parse for codec failed. Go to use a dummy codec.\n",
 			     __func__);
 			ret = asoc_sprd_card_dummy_codec_sel(codec, dai_link->codecs);
 			if (ret)

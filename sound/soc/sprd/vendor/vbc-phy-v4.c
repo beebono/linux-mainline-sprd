@@ -256,7 +256,7 @@ int ap_vbc_set_watermark(int fifo_id, int watermark_type, u32 watermark)
 		return 0;
 	}
 	ap_vbc_reg_update(reg, val, mask);
-	pr_info("%s fifo_id=%s, watermark_type = %s, watermark = %u\n",
+	pr_debug("%s fifo_id=%s, watermark_type = %s, watermark = %u\n",
 			__func__, ap_vbc_fifo_id2name(fifo_id),
 			ap_vbc_watermark_type2name(watermark_type), watermark);
 
@@ -313,7 +313,7 @@ void ap_vbc_data_format_set(int fifo_id, enum VBC_DAT_FORMAT dat_fmt)
 	}
 	val = dat_fmt << shift;
 	ap_vbc_reg_update(reg, val, mask);
-	pr_info("fifo_id =%s dat_fmt =%s\n",
+	pr_debug("fifo_id =%s dat_fmt =%s\n",
 		ap_vbc_fifo_id2name(fifo_id), ap_vbc_datafmt2name(dat_fmt));
 }
 
@@ -442,7 +442,7 @@ int ap_vbc_fifo_enable(int fifo_id, int chan, int enable)
 	else
 		val = ~bit;
 	ap_vbc_reg_update(reg, val, mask);
-	pr_info("%s fifo_id=%s, vbc_chan =%s, enable=%d\n",
+	pr_debug("%s fifo_id=%s, vbc_chan =%s, enable=%d\n",
 		__func__, ap_vbc_fifo_id2name(fifo_id),
 		ap_vbc_chan_id2name(chan), enable);
 
@@ -479,7 +479,7 @@ void ap_vbc_fifo_clear(int fifo_id)
 		return;
 	}
 	ap_vbc_reg_update(reg, bit, mask);
-	pr_info("%s fifo=%s\n", __func__, ap_vbc_fifo_id2name(fifo_id));
+	pr_debug("%s fifo=%s\n", __func__, ap_vbc_fifo_id2name(fifo_id));
 }
 
 /* AP FIFO DMA ENABLE */
@@ -587,7 +587,7 @@ void ap_vbc_aud_dma_chn_en(int fifo_id, int vbc_chan, int enable)
 	else
 		val = ~bit;
 	ap_vbc_reg_update(reg, val, mask);
-	pr_info("%s fifo_id=%s, vbc_chan =%s, enable=%d\n",
+	pr_debug("%s fifo_id=%s, vbc_chan =%s, enable=%d\n",
 		__func__, ap_vbc_fifo_id2name(fifo_id),
 		ap_vbc_chan_id2name(vbc_chan), enable);
 }
@@ -1579,7 +1579,7 @@ int dsp_hp_crosstalk_en_set(u32 enable)
 	int ret;
 	u32 hp_crosstalk_enable = enable;
 
-	pr_info("%s enable = %d", __func__, enable);
+	pr_debug("%s enable = %d", __func__, enable);
 
 	ret = aud_send_cmd(AMSG_CH_VBC_CTL,
 		SND_KCTL_TYPE_HP_CROSSTALK_EN,
@@ -1602,7 +1602,7 @@ int dsp_hp_crosstalk_gain(int value0, int value1)
 
 	hp_crosstalk_gain.gain0 = value0;
 	hp_crosstalk_gain.gain1 = value1;
-	pr_info("%s gain0 = %d, gain1 = %d", __func__, value0, value1);
+	pr_debug("%s gain0 = %d, gain1 = %d", __func__, value0, value1);
 
 	ret = aud_send_cmd(AMSG_CH_VBC_CTL,
 		SND_KCTL_TYPE_HP_CROSSTALK_GAIN,
@@ -1623,7 +1623,7 @@ int dsp_audio_zoom_st_set(u32 value)
 	int ret;
 	u32 audio_zoom_st_value = value;
 
-	pr_info("%s value = %d", __func__, value);
+	pr_debug("%s value = %d", __func__, value);
 
 	ret = aud_send_cmd(AMSG_CH_VBC_CTL,
 		SND_KCTL_TYPE_AUDIO_ZOOM_ST,
@@ -1644,7 +1644,7 @@ int dsp_audio_zoom_ratio_set(int ratio)
 	int ret;
 	int audio_zoom_ratio_value = ratio;
 
-	pr_info("%s ratio = %d", __func__, ratio);
+	pr_debug("%s ratio = %d", __func__, ratio);
 
 	ret = aud_send_cmd(AMSG_CH_VBC_CTL,
 		SND_KCTL_TYPE_AUDIO_ZOOM_RATIO,
@@ -1671,7 +1671,7 @@ int dsp_audio_zoom_focus_set(int type, int x, int y, int width, int height)
 	audio_zoom_focus.width = width;
 	audio_zoom_focus.height = height;
 
-	pr_info("%s type = %d, x = %d, y = %d, width = %d, height = %d",
+	pr_debug("%s type = %d, x = %d, y = %d, width = %d, height = %d",
 		__func__, type, x, y, width, height);
 
 	ret = aud_send_cmd(AMSG_CH_VBC_CTL,
