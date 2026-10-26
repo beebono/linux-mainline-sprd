@@ -84,12 +84,26 @@
 		no-map;
 	};
 
+	/* SYSTEM_SUSPEND takes the SoC into deep sleep, where the 26 MHz XO
+	 * stops and the system counter loses power; the monitor restarts it
+	 * where it stopped, and the time asleep comes from the RTC. */
+	timer {
+		arm,no-tick-in-suspend;
+	};
+
 	/* EL3 monitor (PSCI): code, stacks, and a status page at +0xf000.
 	 * Must match CFW_MON_BASE in the SPL. */
 	cfw-monitor@80100000 {
 		reg = <0 0x80100000 0 0x10000>;
 		no-map;
 	};
+};
+
+/* The pm_sys CM4 owns the SoC's deep-sleep handshake. The CFW SPL never sets
+ * up the firewall, so its reset is not TZPC-locked and the remoteproc can start
+ * it; the boot stub and firmware are in the initramfs. */
+&pmsys {
+	status = "okay";
 };
 
 /* SDIO wifi (mmc1): unused on the CFW, and with no u-boot to power the
