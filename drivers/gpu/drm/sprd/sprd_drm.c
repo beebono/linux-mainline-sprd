@@ -18,6 +18,7 @@
 #include <drm/drm_fbdev_dma.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_modeset_helper.h>
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
@@ -218,6 +219,25 @@ static void sprd_drm_shutdown(struct platform_device *pdev)
 	drm_atomic_helper_shutdown(drm);
 }
 
+/*
+ * System sleep: turn the pipeline off and back on through the atomic helpers.
+ * The DPU and DSI both cold-init in their enable paths, which a resume needs:
+ * in deep sleep AP_SYS powers down and they lose every register. A DPU left
+ * scanning out also keeps AP_SYS (and so the SoC) from sleeping at all.
+ */
+static int sprd_drm_pm_suspend(struct device *dev)
+{
+	return drm_mode_config_helper_suspend(dev_get_drvdata(dev));
+}
+
+static int sprd_drm_pm_resume(struct device *dev)
+{
+	return drm_mode_config_helper_resume(dev_get_drvdata(dev));
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(sprd_drm_pm_ops, sprd_drm_pm_suspend,
+				sprd_drm_pm_resume);
+
 static const struct of_device_id drm_match_table[] = {
 	{ .compatible = "sprd,display-subsystem", },
 	{ /* sentinel */ },
@@ -231,6 +251,7 @@ static struct platform_driver sprd_drm_driver = {
 	.driver = {
 		.name = "sprd-drm-drv",
 		.of_match_table = drm_match_table,
+		.pm = pm_sleep_ptr(&sprd_drm_pm_ops),
 	},
 };
 
