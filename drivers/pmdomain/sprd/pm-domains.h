@@ -6,6 +6,11 @@
 #define SPRD_PD_ALWAYS_ON		BIT(0)
 #define SPRD_PD_SHUTDOWN		BIT(1)
 #define SPRD_PD_ACTIVE_WAKEUP		BIT(2)
+/*
+ * Power off the old way, force and auto shutdown together, which leaves the
+ * domain up: for one whose consumer can't come back from a real power loss.
+ */
+#define SPRD_PD_SOFT_OFF		BIT(3)
 #define SPRD_PD_CAPS(_pd, _x)		((_pd)->data->caps & (_x))
 
 #define SPRD_PMU_FORCE_SHUTDOWN_MASK	GENMASK(25, 24)

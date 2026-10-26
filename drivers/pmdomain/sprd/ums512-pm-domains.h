@@ -9,7 +9,15 @@
 static const struct sprd_pmu_domain_data sprd_pmu_domain_data_ums512[] = {
 	[UMS512_POWER_DOMAIN_GPU_TOP] = {
 		.name = "gpu_top",
-		.caps = SPRD_PD_SHUTDOWN,
+		/*
+		 * The GPU clock controller and its reset sit inside the
+		 * domain, and mali_kbase comes back from a real power loss to
+		 * a GPU that never finishes a job: keep the pre-plorpOS
+		 * behaviour, which never takes it fully off. Its enable clock
+		 * (AON GPU_EB) still drops, which is what AP_SYS deep sleep
+		 * waits on.
+		 */
+		.caps = SPRD_PD_SHUTDOWN | SPRD_PD_SOFT_OFF,
 		.pd_cfg_offs = 0x0030,
 		.state_offs = 0x010c,
 		.state_mask = GENMASK(15, 8),
