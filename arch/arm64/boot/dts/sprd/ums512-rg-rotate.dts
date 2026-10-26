@@ -316,13 +316,21 @@
 	sys_keys: gpio-keys-system {
 		compatible = "gpio-keys";
 		pinctrl-names = "default";
-		pinctrl-0 = <&hall_pin_func &hall_pin_misc &volup_pin_func &volup_pin_misc>;
+		pinctrl-0 = <&hall_pin_func &hall_pin_misc &hall_pin_sleep
+			     &volup_pin_func &volup_pin_misc>;
 
 		sw-hall {
 			label = "Hall Swivel";
 			linux,input-type = <EV_SW>;
 			linux,code = <SW_LID>;
-			gpios = <&ap_gpio 54 GPIO_ACTIVE_LOW>;
+			/*
+			 * The pad (SPI2_DI, function 2) read through EIC
+			 * debounce channel 15, as stock does: the EIC is in the
+			 * always-on domain and keeps seeing the line in deep
+			 * sleep, where an AP GPIO edge goes undetected (opening
+			 * the swivel never woke the device).
+			 */
+			gpios = <&eic_debounce 15 GPIO_ACTIVE_LOW>;
 			debounce-interval = <10>;
 			wakeup-source;
 			/*
@@ -488,15 +496,30 @@
 		bias-pull-up = <20000>;
 	};
 
+	/* func2 routes the pad to EIC debounce channel 15 (func4 is AP GPIO
+	 * 54, which the EIC does not see); found by trying each function. */
 	hall_pin_func: hall-pin-func {
 		pins = "UMS512_SPI2_DI";
-		function = "func4";
+		function = "func2";
 	};
 
 	hall_pin_misc: hall-pin-misc {
 		pins = "UMS512_SPI2_DI_MISC";
 		input-enable;
 		bias-pull-up = <20000>;
+	};
+
+	/*
+	 * The same input and pull-up in the pad's sleep-mode bits, which take
+	 * over while the chip is in deep sleep. The open-drain hall sensor
+	 * only pulls the line low (closed); opening relies on the pull-up to
+	 * raise it, for the EIC to see in deep sleep.
+	 */
+	hall_pin_sleep: hall-pin-sleep {
+		pins = "UMS512_SPI2_DI_MISC";
+		sleep-hardware-state;
+		input-enable;
+		bias-pull-up;
 	};
 };
 
